@@ -132,6 +132,18 @@ GitHub Actions workflow (`.github/workflows/build.yml`) runs on every push to ma
 4. Uploads as build artifacts
 5. Creates a GitHub Release tagged `build-<short-sha>`
 
+## Git Push
+
+This repo belongs to the `arobinsongit` GitHub account. Before pushing, switch to the correct account:
+
+```bash
+# Save current account, switch, push, switch back
+PREV_USER=$(gh auth status 2>&1 | grep "Active account: true" -B3 | head -1 | awk '{print $NF}')
+gh auth switch --user arobinsongit
+git push origin <branch>
+if [ "$PREV_USER" != "arobinsongit" ] && [ -n "$PREV_USER" ]; then gh auth switch --user "$PREV_USER"; fi
+```
+
 ## Frontend Conventions
 
 - ES modules bundled by esbuild into single minified `app.min.js`
