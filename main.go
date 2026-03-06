@@ -41,19 +41,33 @@ func main() {
 			return
 		}
 
+		type VideoInfo struct {
+			Name     string `json:"name"`
+			Size     int64  `json:"size"`
+			Modified string `json:"modified"`
+		}
+
 		videoExts := map[string]bool{".mp4": true, ".mov": true, ".avi": true, ".mkv": true, ".webm": true}
-		var videos []string
+		var videos []VideoInfo
 		for _, e := range entries {
 			if e.IsDir() {
 				continue
 			}
 			ext := strings.ToLower(filepath.Ext(e.Name()))
 			if videoExts[ext] {
-				videos = append(videos, e.Name())
+				info, err := e.Info()
+				if err != nil {
+					continue
+				}
+				videos = append(videos, VideoInfo{
+					Name:     e.Name(),
+					Size:     info.Size(),
+					Modified: info.ModTime().Format("2006-01-02 15:04"),
+				})
 			}
 		}
 		sort.Slice(videos, func(i, j int) bool {
-			return strings.ToLower(videos[i]) < strings.ToLower(videos[j])
+			return strings.ToLower(videos[i].Name) < strings.ToLower(videos[j].Name)
 		})
 
 		jsonOK(w, videos)
@@ -79,7 +93,7 @@ func main() {
 		http.ServeFile(w, r, fullPath)
 	})
 
-	// Read config
+	// Read config (parses text file, returns JSON to frontend)
 	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
 		dir := r.URL.Query().Get("dir")
 		if dir == "" {
@@ -90,16 +104,22 @@ func main() {
 		configPath := filepath.Join(dir, "video-sorter-config.txt")
 		data, err := os.ReadFile(configPath)
 		if err != nil {
-			// No config yet - return empty
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte("{}"))
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(data)
+		subjects, tags := parseConfigText(string(data))
+		result := map[string][]string{}
+		if len(subjects) > 0 {
+			result["subjects"] = subjects
+		}
+		if len(tags) > 0 {
+			result["tags"] = tags
+		}
+		jsonOK(w, result)
 	})
 
-	// Save config
+	// Save config (receives JSON from frontend, writes text file)
 	mux.HandleFunc("/api/config/save", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			jsonError(w, "POST required", 405)
@@ -107,8 +127,9 @@ func main() {
 		}
 
 		var req struct {
-			Dir     string          `json:"dir"`
-			Content json.RawMessage `json:"content"`
+			Dir     string   `json:"dir"`
+			Subjects []string `json:"subjects"`
+			Tags    []string `json:"tags"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			jsonError(w, err.Error(), 400)
@@ -116,7 +137,8 @@ func main() {
 		}
 
 		configPath := filepath.Join(req.Dir, "video-sorter-config.txt")
-		if err := os.WriteFile(configPath, req.Content, 0644); err != nil {
+		text := buildConfigText(req.Subjects, req.Tags)
+		if err := os.WriteFile(configPath, []byte(text), 0644); err != nil {
 			jsonError(w, err.Error(), 500)
 			return
 		}
@@ -165,6 +187,31 @@ func main() {
 			jsonError(w, err.Error(), 500)
 			return
 		}
+		jsonOK(w, "ok")
+	})
+
+	// Open folder in OS file explorer
+	mux.HandleFunc("/api/open-folder", func(w http.ResponseWriter, r *http.Request) {
+		dir := r.URL.Query().Get("dir")
+		if dir == "" {
+			jsonError(w, "dir parameter required", 400)
+			return
+		}
+		info, err := os.Stat(dir)
+		if err != nil || !info.IsDir() {
+			jsonError(w, "not a valid directory", 400)
+			return
+		}
+		var cmd *exec.Cmd
+		switch runtime.GOOS {
+		case "windows":
+			cmd = exec.Command("explorer", dir)
+		case "darwin":
+			cmd = exec.Command("open", dir)
+		default:
+			cmd = exec.Command("xdg-open", dir)
+		}
+		cmd.Start()
 		jsonOK(w, "ok")
 	})
 
@@ -240,6 +287,52 @@ func jsonError(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+func parseConfigText(text string) (subjects []string, tags []string) {
+	section := ""
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(lower, "# subjects") || strings.HasPrefix(lower, "# players") {
+			section = "subjects"
+			continue
+		}
+		if strings.HasPrefix(lower, "# tags") {
+			section = "tags"
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		switch section {
+		case "subjects":
+			subjects = append(subjects, line)
+		case "tags":
+			tags = append(tags, line)
+		}
+	}
+	return
+}
+
+func buildConfigText(subjects []string, tags []string) string {
+	var b strings.Builder
+	b.WriteString("# Subjects\n")
+	b.WriteString("# One per line\n")
+	for _, p := range subjects {
+		b.WriteString(p)
+		b.WriteString("\n")
+	}
+	b.WriteString("\n# Tags\n")
+	b.WriteString("# One per line (use dashes instead of spaces, e.g. home-run)\n")
+	for _, t := range tags {
+		b.WriteString(t)
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 func openBrowser(url string) {
