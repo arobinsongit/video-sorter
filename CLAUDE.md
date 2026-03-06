@@ -134,15 +134,21 @@ GitHub Actions workflow (`.github/workflows/build.yml`) runs on every push to ma
 
 ## Git Push
 
-This repo belongs to the `arobinsongit` GitHub account. Before pushing, switch to the correct account:
+Before pushing, switch to the correct GitHub account. Set `GH_PUSH_USER` below (or reference an env var with `ENV:VAR_NAME`).
+
+**GitHub push user:** `arobinsongit`
 
 ```bash
-# Save current account, switch, push, switch back
+# Read push user from CLAUDE.md instruction above (or resolve ENV: reference)
+RAW_USER="arobinsongit"  # ← keep in sync with "GitHub push user" above
+if [[ "$RAW_USER" == ENV:* ]]; then RAW_USER="${!RAW_USER#ENV:}"; fi
 PREV_USER=$(gh auth status 2>&1 | grep "Active account: true" -B3 | head -1 | awk '{print $NF}')
-gh auth switch --user arobinsongit
+if [ "$PREV_USER" != "$RAW_USER" ]; then gh auth switch --user "$RAW_USER"; fi
 git push origin <branch>
-if [ "$PREV_USER" != "arobinsongit" ] && [ -n "$PREV_USER" ]; then gh auth switch --user "$PREV_USER"; fi
+if [ "$PREV_USER" != "$RAW_USER" ] && [ -n "$PREV_USER" ]; then gh auth switch --user "$PREV_USER"; fi
 ```
+
+To use an env var instead, change the push user line to e.g. `ENV:GH_REPO_USER`.
 
 ## Frontend Conventions
 
