@@ -4,112 +4,138 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A portable video sorting tool for videographers. Users watch short sports videos, annotate them with subjects (player numbers), tags, and quality ratings, then the app renames files encoding metadata into the filename (e.g., `clip__S88__double_slide__great.mp4`). Single binary, cross-platform, opens in browser.
+A portable video sorting tool for videographers. Users watch short sports videos, annotate them with configurable metadata groups (subjects, tags, quality, or any custom group), then the app renames/moves/copies files encoding metadata into the filename (e.g., `clip__S88__double_slide__great.mp4`). Single binary, cross-platform, opens in browser.
 
 ## Architecture
 
-**Single-binary web app:** Go backend with `embed.FS` serves an HTML/JS/CSS frontend (`index.html`) via local HTTP on a random port, then auto-opens the browser. No external dependencies, no node_modules, no build tools for the frontend.
+**Single-binary web app:** Go backend with `embed.FS` serves a bundled frontend via local HTTP on a random port, then auto-opens the browser. Frontend is built with esbuild (minified + bundled), embedded at compile time.
 
-- `main.go` — HTTP server, REST API endpoints, config file parsing, session persistence
-- `index.html` — Complete SPA frontend (Tailwind via CDN, vanilla JS, no framework)
-- `favicon.svg` — App icon (purple gradient play button with film strip and orange tag)
-- `.github/workflows/build.yml` — CI: builds all platforms on push to main, creates GitHub Release with binaries
+### Backend
+- `main.go` — HTTP server, REST API endpoints, JSON config management, session persistence, file operations (rename/move/copy)
+- Uses `//go:embed all:static` to embed the built frontend
+
+### Frontend (source in `frontend/`)
+- `frontend/index.html` — HTML shell with Tailwind CSS via CDN
+- `frontend/src/` — ES modules bundled by esbuild:
+  - `main.js` — Entry point, initialization, video player, keyboard shortcuts
+  - `state.js` — Shared state object
+  - `api.js` — All fetch wrappers for backend endpoints
+  - `groups.js` — Dynamic metadata group rendering (multi-select, single-select, slider)
+  - `preview.js` — Template-based filename preview + annotation parsing
+  - `fileList.js` — File list with sorting and filtering
+  - `configEditor.js` — Settings editor modal (output format, mode, groups)
+  - `theme.js` — Dark/light theme toggle + button class helpers
+  - `modal.js` — Reusable modal dialog
+  - `utils.js` — MRU helpers, formatSize, clearChildren
+
+### Build output
+- `static/` — Built frontend files (index.html, app.min.js, favicon.svg) — committed to git so `go build` works without npm
+- `dist/` — Release binaries (gitignored)
 
 **Key patterns:**
-- `//go:embed index.html` and `//go:embed favicon.svg` embed assets at compile time
-- Config stored as human-readable `video-sorter-config.txt` alongside videos (section-based: `# Subjects`, `# Tags`, one entry per line)
-- Session persisted to `~/.video-sorter-session.json` (remembers last directory, file, MRU order)
+- Config stored as `video-sorter-config.json` per video folder (auto-migrates from old `.txt` format)
+- Session persisted to `~/.video-sorter-session.json` (remembers last directory, file, MRU order per group)
+- User settings at `~/.video-sorter-settings.json` (theme, keybindings)
 - Video must be unloaded (`pause()` + remove `src` + `load()`) before rename on Windows due to file locking
-- MRU (Most Recently Used) sorting for subjects and tags — last-clicked items appear first
-- Modal callback pattern: save callback ref before `hideModal()` nullifies it
+- MRU (Most Recently Used) sorting for all group options
+- Dynamic group rendering from config — no hardcoded metadata types
+- Template-based output format with `{token}` placeholders
+
+## Config Format
+
+Stored as `video-sorter-config.json` in the video folder:
+```json
+{
+  "version": 1,
+  "outputFormat": "{basename}__{S}__{tags}__{quality}.{ext}",
+  "outputFolder": "",
+  "outputMode": "rename",
+  "groups": [
+    {
+      "name": "Subject", "key": "S", "type": "multi-select",
+      "inputType": "number", "options": ["1","2",...],
+      "allowCustom": true, "separator": "__", "prefix": "S"
+    },
+    {
+      "name": "Tags", "key": "tags", "type": "multi-select",
+      "inputType": "text", "options": ["slide","catch",...],
+      "allowCustom": true, "separator": "_", "prefix": ""
+    },
+    {
+      "name": "Quality", "key": "quality", "type": "single-select",
+      "inputType": "slider", "options": ["bad","ok","good","great"],
+      "allowCustom": false, "separator": "", "prefix": ""
+    }
+  ]
+}
+```
+
+Group types: `multi-select` (toggle buttons, Set), `single-select` (radio buttons or slider).
+Input types: `number`, `text`, `slider`.
+Output modes: `rename` (in place), `move` (to outputFolder), `copy` (to outputFolder).
 
 ## API Endpoints
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/` | GET | Serve embedded HTML |
+| `/` | GET | Serve embedded frontend |
 | `/api/list?dir=` | GET | List video files with metadata |
 | `/api/video?dir=&file=` | GET | Serve video file for playback |
-| `/api/config?dir=` | GET | Read config text file as JSON |
-| `/api/config/save` | POST | Write config from JSON to text file |
-| `/api/rename` | POST | Rename video file (metadata encoding) |
+| `/api/config?dir=` | GET | Read JSON config (auto-migrates from .txt) |
+| `/api/config/save` | POST | Write JSON config `{dir, config}` |
+| `/api/rename` | POST | Rename/move/copy video `{dir, oldName, newName, outputMode, outputFolder}` |
 | `/api/session` | GET | Load session state |
 | `/api/session/save` | POST | Save session state |
+| `/api/user-settings` | GET/POST | Read/write user settings |
 | `/api/open-folder?dir=` | GET | Open directory in OS file explorer |
-| `/favicon.svg` | GET | Serve embedded favicon |
 
 ## Build
 
 ```bash
-# Dev: build and run (Windows)
+# Prerequisites: Node.js 18+, Go 1.21+
+
+# Dev: build frontend + Go binary (Windows)
+npm install          # first time only
+npm run build        # bundles JS, copies HTML/favicon to static/
 go build -o video-sorter.exe . && ./video-sorter.exe
 
-# Dev: build and run (Mac/Linux)
+# Dev: build frontend + Go binary (Mac/Linux)
+npm install && npm run build
 go build -o video-sorter . && ./video-sorter
 
-# Cross-platform release builds (outputs to dist/)
+# Cross-platform release builds
 bash build.sh        # from Mac/Linux
 build.bat            # from Windows
 ```
 
-Builds produce 4 binaries: Windows amd64, Mac Intel, Mac ARM, Linux amd64. Uses `-ldflags="-s -w"` for size optimization.
-
-**Important on Windows:** Kill existing processes before rebuilding — the browser holds a connection that keeps the exe locked:
+**Important on Windows:** Kill existing processes before rebuilding:
 ```bash
-taskkill //F //IM video-sorter.exe 2>/dev/null; go build -o video-sorter.exe .
+taskkill //F //IM video-sorter.exe 2>/dev/null; npm run build && go build -o video-sorter.exe .
 ```
 
 ## Filename Encoding Format
 
-`basename__S{subject1}_S{subject2}__tag1_tag2__quality.ext`
+Template-based: `{basename}__{S}__{tags}__{quality}.{ext}` (configurable)
 
+Default encoding: `basename__S{subject1}__S{subject2}__tag1_tag2__quality.ext`
 - `__` (double underscore) separates sections
-- `S` prefix for subjects (not `P` — may not be players)
+- `S` prefix for subjects (configurable per group)
 - Quality values: `great`, `good`, `ok`, `bad`
 - A file is considered "tagged" if its name contains `__`
-- Special suffix `__review` marks a file as flagged for review
 
 ## CI/CD
 
 GitHub Actions workflow (`.github/workflows/build.yml`) runs on every push to main:
-1. Builds all 4 platform binaries
-2. Uploads as build artifacts
-3. Creates a GitHub Release tagged `build-<short-sha>` with all binaries attached
-
-Releases: https://github.com/arobinsongit/video-sorter/releases
-
-## Config File Format
-
-Stored as `video-sorter-config.txt` in the video folder:
-```
-# Subjects
-# One per line
-21
-8
-93
-
-# Tags
-# One per line (use dashes instead of spaces, e.g. home-run)
-slide
-home-run
-warmup
-```
-
-Parsed by `parseConfigText()` / written by `buildConfigText()` in `main.go`.
+1. Installs Node.js 22 + Go
+2. Builds frontend (`npm install && npm run build`)
+3. Builds all 4 platform binaries
+4. Uploads as build artifacts
+5. Creates a GitHub Release tagged `build-<short-sha>`
 
 ## Frontend Conventions
 
-- Vanilla JS with Tailwind CSS via CDN — no build step, no framework
-- All state is in plain variables/Sets at the top of the `<script>` block
-- `table-layout: fixed` with explicit pixel widths for file list columns
-- Light/dark mode toggle stored in `localStorage('theme')`
-- `selectedSubjects` is a Set (multi-select), `selectedTags` is a Set (toggle on/off)
-- `mruBump(arr, val)` / `mruSort(items, mru)` handle MRU ordering
-
-## Issue Backlog
-
-Feature issues are tracked on GitHub Issues (#1-#24). Key themes:
-- Speed: keyboard shortcuts (#1), auto-play (#2), smart suggestions (#16), voice commands (#22)
-- Visibility: untagged filter (#3), progress bar (#9), color-coded rows (#14), duration column (#13)
-- Batch ops: batch tagging (#7), apply to all visible (#18), presets (#8)
-- Infrastructure: audit log (#21), folder history (#11), cloud storage (#24), iOS app (#23)
+- ES modules bundled by esbuild into single minified `app.min.js`
+- Tailwind CSS via CDN — no build step for CSS
+- All state centralized in `state.js` — plain object with videos, config, selections, MRU
+- Dynamic group rendering — `groups.js` generates UI from config definition
+- No framework dependencies — vanilla JS with DOM APIs
