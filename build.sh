@@ -1,5 +1,9 @@
 #!/bin/bash
 echo "Building Video Sorter..."
+
+echo "Building frontend..."
+npm run build
+
 mkdir -p dist
 
 echo "[1/4] Windows (amd64)..."

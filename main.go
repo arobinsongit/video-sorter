@@ -4,6 +4,8 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -14,27 +16,136 @@ import (
 	"strings"
 )
 
-//go:embed index.html
-var indexHTML embed.FS
+// GroupDef defines a metadata group (e.g. Subject, Tags, Quality)
+type GroupDef struct {
+	Name        string   `json:"name"`
+	Key         string   `json:"key"`
+	Type        string   `json:"type"`        // "multi-select" or "single-select"
+	InputType   string   `json:"inputType"`   // "number", "text", or "slider"
+	Options     []string `json:"options"`
+	AllowCustom bool     `json:"allowCustom"`
+	Separator   string   `json:"separator"`
+	Prefix      string   `json:"prefix"`
+}
 
-//go:embed favicon.svg
-var faviconSVG []byte
+// ProjectConfig is the JSON config stored per video folder
+type ProjectConfig struct {
+	Version      int               `json:"version"`
+	OutputFormat string            `json:"outputFormat"`
+	OutputFolder string            `json:"outputFolder"`
+	OutputMode   string            `json:"outputMode"`
+	Groups       []GroupDef        `json:"groups"`
+	Keybindings  map[string]string `json:"keybindings,omitempty"`
+}
+
+func defaultConfig() ProjectConfig {
+	return ProjectConfig{
+		Version:      1,
+		OutputFormat: "{basename}__{S}__{tags}__{quality}.{ext}",
+		OutputFolder: "",
+		OutputMode:   "rename",
+		Groups: []GroupDef{
+			{
+				Name:        "Subject",
+				Key:         "S",
+				Type:        "multi-select",
+				InputType:   "number",
+				Options:     []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25"},
+				AllowCustom: true,
+				Separator:   "__",
+				Prefix:      "S",
+			},
+			{
+				Name:        "Tags",
+				Key:         "tags",
+				Type:        "multi-select",
+				InputType:   "text",
+				Options:     []string{"single", "double", "triple", "home-run", "strikeout", "walk", "steal", "catch", "dive", "throw", "slide", "bunt", "sac-fly", "error", "celebration", "pitching", "hitting", "fielding", "running", "warmup"},
+				AllowCustom: true,
+				Separator:   "_",
+				Prefix:      "",
+			},
+			{
+				Name:        "Quality",
+				Key:         "quality",
+				Type:        "single-select",
+				InputType:   "slider",
+				Options:     []string{"bad", "ok", "good", "great"},
+				AllowCustom: false,
+				Separator:   "",
+				Prefix:      "",
+			},
+		},
+	}
+}
+
+func migrateOrLoadConfig(dir string) (ProjectConfig, error) {
+	jsonPath := filepath.Join(dir, "video-sorter-config.json")
+	txtPath := filepath.Join(dir, "video-sorter-config.txt")
+
+	// 1. Try JSON config first
+	if data, err := os.ReadFile(jsonPath); err == nil {
+		var cfg ProjectConfig
+		if err := json.Unmarshal(data, &cfg); err == nil {
+			return cfg, nil
+		}
+	}
+
+	// 2. Try migrating from .txt
+	if data, err := os.ReadFile(txtPath); err == nil {
+		subjects, tags := parseConfigText(string(data))
+		cfg := defaultConfig()
+		if len(subjects) > 0 {
+			cfg.Groups[0].Options = subjects
+		}
+		if len(tags) > 0 {
+			cfg.Groups[1].Options = tags
+		}
+		// Write the new JSON config
+		writeProjectConfig(jsonPath, cfg)
+		return cfg, nil
+	}
+
+	// 3. No config exists — return defaults
+	cfg := defaultConfig()
+	writeProjectConfig(jsonPath, cfg)
+	return cfg, nil
+}
+
+func writeProjectConfig(path string, cfg ProjectConfig) error {
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
+}
+
+//go:embed all:static
+var staticFS embed.FS
 
 func main() {
 	mux := http.NewServeMux()
 
-	// Serve favicon
-	mux.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/svg+xml")
-		w.Write(faviconSVG)
-	})
-
-	// Serve the embedded HTML
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		data, _ := indexHTML.ReadFile("index.html")
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write(data)
-	})
+	// Serve embedded frontend (static/index.html, static/app.min.js, static/favicon.svg)
+	staticContent, _ := fs.Sub(staticFS, "static")
+	mux.Handle("/", http.FileServer(http.FS(staticContent)))
 
 	// List video files in a directory
 	mux.HandleFunc("/api/list", func(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +213,7 @@ func main() {
 		http.ServeFile(w, r, fullPath)
 	})
 
-	// Read config (parses text file, returns JSON to frontend)
+	// Read config (JSON config with migration from .txt)
 	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
 		dir := r.URL.Query().Get("dir")
 		if dir == "" {
@@ -110,25 +221,15 @@ func main() {
 			return
 		}
 
-		configPath := filepath.Join(dir, "video-sorter-config.txt")
-		data, err := os.ReadFile(configPath)
+		cfg, err := migrateOrLoadConfig(dir)
 		if err != nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte("{}"))
+			jsonError(w, err.Error(), 500)
 			return
 		}
-		subjects, tags := parseConfigText(string(data))
-		result := map[string][]string{}
-		if len(subjects) > 0 {
-			result["subjects"] = subjects
-		}
-		if len(tags) > 0 {
-			result["tags"] = tags
-		}
-		jsonOK(w, result)
+		jsonOK(w, cfg)
 	})
 
-	// Save config (receives JSON from frontend, writes text file)
+	// Save config (receives full ProjectConfig JSON)
 	mux.HandleFunc("/api/config/save", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			jsonError(w, "POST required", 405)
@@ -136,25 +237,23 @@ func main() {
 		}
 
 		var req struct {
-			Dir     string   `json:"dir"`
-			Subjects []string `json:"subjects"`
-			Tags    []string `json:"tags"`
+			Dir    string        `json:"dir"`
+			Config ProjectConfig `json:"config"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			jsonError(w, err.Error(), 400)
 			return
 		}
 
-		configPath := filepath.Join(req.Dir, "video-sorter-config.txt")
-		text := buildConfigText(req.Subjects, req.Tags)
-		if err := os.WriteFile(configPath, []byte(text), 0644); err != nil {
+		configPath := filepath.Join(req.Dir, "video-sorter-config.json")
+		if err := writeProjectConfig(configPath, req.Config); err != nil {
 			jsonError(w, err.Error(), 500)
 			return
 		}
 		jsonOK(w, "ok")
 	})
 
-	// Rename video
+	// Rename/move/copy video
 	mux.HandleFunc("/api/rename", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			jsonError(w, "POST required", 405)
@@ -162,16 +261,18 @@ func main() {
 		}
 
 		var req struct {
-			Dir     string `json:"dir"`
-			OldName string `json:"oldName"`
-			NewName string `json:"newName"`
+			Dir          string `json:"dir"`
+			OldName      string `json:"oldName"`
+			NewName      string `json:"newName"`
+			OutputMode   string `json:"outputMode"`
+			OutputFolder string `json:"outputFolder"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			jsonError(w, err.Error(), 400)
 			return
 		}
 
-		// Prevent path traversal
+		// Prevent path traversal on filenames
 		for _, name := range []string{req.OldName, req.NewName} {
 			clean := filepath.Clean(name)
 			if strings.Contains(clean, string(filepath.Separator)) || strings.Contains(clean, "..") {
@@ -180,22 +281,71 @@ func main() {
 			}
 		}
 
-		oldPath := filepath.Join(req.Dir, req.OldName)
-		newPath := filepath.Join(req.Dir, req.NewName)
+		// Validate outputFolder if provided
+		if req.OutputFolder != "" {
+			clean := filepath.Clean(req.OutputFolder)
+			if strings.Contains(clean, "..") {
+				jsonError(w, "invalid output folder", 400)
+				return
+			}
+		}
 
+		oldPath := filepath.Join(req.Dir, req.OldName)
 		if _, err := os.Stat(oldPath); os.IsNotExist(err) {
 			jsonError(w, "file not found: "+req.OldName, 404)
 			return
 		}
+
+		mode := req.OutputMode
+		if mode == "" {
+			mode = "rename"
+		}
+
+		var newPath string
+		if mode == "rename" || req.OutputFolder == "" {
+			newPath = filepath.Join(req.Dir, req.NewName)
+		} else {
+			destDir := req.OutputFolder
+			if !filepath.IsAbs(destDir) {
+				destDir = filepath.Join(req.Dir, destDir)
+			}
+			if err := os.MkdirAll(destDir, 0755); err != nil {
+				jsonError(w, "failed to create output folder: "+err.Error(), 500)
+				return
+			}
+			newPath = filepath.Join(destDir, req.NewName)
+		}
+
 		if _, err := os.Stat(newPath); err == nil {
 			jsonError(w, "target already exists: "+req.NewName, 409)
 			return
 		}
 
-		if err := os.Rename(oldPath, newPath); err != nil {
-			jsonError(w, err.Error(), 500)
+		switch mode {
+		case "rename", "move":
+			if err := os.Rename(oldPath, newPath); err != nil {
+				// Cross-filesystem move: fall back to copy+delete
+				if mode == "move" {
+					if err := copyFile(oldPath, newPath); err != nil {
+						jsonError(w, err.Error(), 500)
+						return
+					}
+					os.Remove(oldPath)
+				} else {
+					jsonError(w, err.Error(), 500)
+					return
+				}
+			}
+		case "copy":
+			if err := copyFile(oldPath, newPath); err != nil {
+				jsonError(w, err.Error(), 500)
+				return
+			}
+		default:
+			jsonError(w, "invalid outputMode: "+mode, 400)
 			return
 		}
+
 		jsonOK(w, "ok")
 	})
 
@@ -225,9 +375,12 @@ func main() {
 	})
 
 	// Session file: ~/.video-sorter-session.json
+	// User settings file: ~/.video-sorter-settings.json
 	sessionPath := ""
+	userSettingsPath := ""
 	if home, err := os.UserHomeDir(); err == nil {
 		sessionPath = filepath.Join(home, ".video-sorter-session.json")
+		userSettingsPath = filepath.Join(home, ".video-sorter-settings.json")
 	}
 
 	// Load session
@@ -267,6 +420,40 @@ func main() {
 			return
 		}
 		jsonOK(w, "ok")
+	})
+
+	// Load user settings
+	mux.HandleFunc("/api/user-settings", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			if userSettingsPath == "" {
+				jsonError(w, "no home directory", 500)
+				return
+			}
+			var body json.RawMessage
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				jsonError(w, err.Error(), 400)
+				return
+			}
+			if err := os.WriteFile(userSettingsPath, body, 0644); err != nil {
+				jsonError(w, err.Error(), 500)
+				return
+			}
+			jsonOK(w, "ok")
+			return
+		}
+		if userSettingsPath == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("{}"))
+			return
+		}
+		data, err := os.ReadFile(userSettingsPath)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("{}"))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(data)
 	})
 
 	// Find a free port

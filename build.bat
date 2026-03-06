@@ -1,5 +1,9 @@
 @echo off
 echo Building Video Sorter...
+
+echo Building frontend...
+call npm run build
+
 if not exist dist mkdir dist
 
 echo [1/4] Windows (amd64)...
