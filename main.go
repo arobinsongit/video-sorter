@@ -17,8 +17,17 @@ import (
 //go:embed index.html
 var indexHTML embed.FS
 
+//go:embed favicon.svg
+var faviconSVG []byte
+
 func main() {
 	mux := http.NewServeMux()
+
+	// Serve favicon
+	mux.HandleFunc("/favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Write(faviconSVG)
+	})
 
 	// Serve the embedded HTML
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
