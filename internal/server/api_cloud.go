@@ -2,12 +2,13 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"media-sorter/internal/storage/dropbox"
 	"media-sorter/internal/storage/gdrive"
@@ -148,7 +149,9 @@ func (s *Server) handleCloudConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	callbackURL := fmt.Sprintf("http://127.0.0.1:%d/api/cloud/callback", s.Port)
-	s.oauthState = fmt.Sprintf("media-sorter-%d", time.Now().UnixNano())
+	stateBytes := make([]byte, 16)
+	rand.Read(stateBytes)
+	s.oauthState = hex.EncodeToString(stateBytes)
 
 	switch req.Provider {
 	case "gdrive":

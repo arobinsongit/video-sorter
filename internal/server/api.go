@@ -12,6 +12,22 @@ import (
 	"media-sorter/internal/storage"
 )
 
+// validateLocalDir checks that dir is a valid local directory.
+// Returns true if valid, false if an error was written to the response.
+func validateLocalDir(w http.ResponseWriter, dir string) bool {
+	clean := filepath.Clean(dir)
+	if strings.Contains(clean, "..") {
+		jsonError(w, "invalid directory path", 400)
+		return false
+	}
+	info, err := os.Stat(clean)
+	if err != nil || !info.IsDir() {
+		jsonError(w, "not a valid directory", 400)
+		return false
+	}
+	return true
+}
+
 func (s *Server) registerCoreAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/list", s.handleList)
 	mux.HandleFunc("/api/media", s.handleMedia)
@@ -28,6 +44,9 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	store := s.getProvider(dir)
+	if store.IsLocal() && !validateLocalDir(w, dir) {
+		return
+	}
 	files, err := store.ListFiles(dir)
 	if err != nil {
 		jsonError(w, err.Error(), 500)
@@ -44,6 +63,9 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	store := s.getProvider(dir)
+	if store.IsLocal() && !validateLocalDir(w, dir) {
+		return
+	}
 	store.ServeFile(w, r, dir, file)
 }
 
@@ -54,6 +76,9 @@ func (s *Server) handleConfigRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	store := s.getProvider(dir)
+	if store.IsLocal() && !validateLocalDir(w, dir) {
+		return
+	}
 	cfg, err := loadConfig(store, dir)
 	if err != nil {
 		jsonError(w, err.Error(), 500)
@@ -76,6 +101,9 @@ func (s *Server) handleConfigSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	store := s.getProvider(req.Dir)
+	if store.IsLocal() && !validateLocalDir(w, req.Dir) {
+		return
+	}
 	if err := saveConfig(store, req.Dir, req.Config); err != nil {
 		jsonError(w, err.Error(), 500)
 		return
@@ -186,9 +214,7 @@ func (s *Server) handleOpenFolder(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "cannot open cloud folders in file explorer", 400)
 		return
 	}
-	info, err := os.Stat(dir)
-	if err != nil || !info.IsDir() {
-		jsonError(w, "not a valid directory", 400)
+	if !validateLocalDir(w, dir) {
 		return
 	}
 	var cmd *exec.Cmd

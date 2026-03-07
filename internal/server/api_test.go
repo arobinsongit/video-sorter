@@ -487,6 +487,50 @@ func TestGetProviderRouting(t *testing.T) {
 	}
 }
 
+func TestAPIListInvalidDir(t *testing.T) {
+	handler := newTestHandler()
+	req := httptest.NewRequest("GET", "/api/list?dir=/nonexistent/path/12345", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestAPIListPathTraversal(t *testing.T) {
+	handler := newTestHandler()
+	req := httptest.NewRequest("GET", "/api/list?dir=../../etc", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestAPIMediaInvalidDir(t *testing.T) {
+	handler := newTestHandler()
+	req := httptest.NewRequest("GET", "/api/media?dir=/nonexistent/path/12345&file=test.mp4", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestAPIConfigReadInvalidDir(t *testing.T) {
+	handler := newTestHandler()
+	req := httptest.NewRequest("GET", "/api/config?dir=/nonexistent/path/12345", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
 func TestOpenFolderMissingDir(t *testing.T) {
 	handler := newTestHandler()
 	req := httptest.NewRequest("GET", "/api/open-folder", nil)
