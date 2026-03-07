@@ -441,14 +441,8 @@ func (d *Storage) IsLocal() bool {
 	return false
 }
 
-// FolderEntry represents a folder in the browse UI.
-type FolderEntry struct {
-	Name string
-	Path string
-}
-
 // ListFolders lists folders at a given path for the browse UI.
-func (d *Storage) ListFolders(path string) ([]FolderEntry, error) {
+func (d *Storage) ListFolders(path string) ([]storage.FolderEntry, error) {
 	payload := map[string]interface{}{
 		"path":                                path,
 		"recursive":                            false,
@@ -478,10 +472,10 @@ func (d *Storage) ListFolders(path string) ([]FolderEntry, error) {
 		return nil, err
 	}
 
-	var folders []FolderEntry
+	var folders []storage.FolderEntry
 	for _, e := range result.Entries {
 		if e.Tag == "folder" {
-			folders = append(folders, FolderEntry{Name: e.Name, Path: e.Path})
+			folders = append(folders, storage.FolderEntry{Name: e.Name, Path: e.Path})
 		}
 	}
 	return folders, nil

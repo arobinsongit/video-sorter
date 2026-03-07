@@ -6,13 +6,6 @@ import (
 	"media-sorter/internal/storage"
 )
 
-// FolderEntry represents a folder in cloud browse results.
-type FolderEntry struct {
-	Name string `json:"name"`
-	ID   string `json:"id,omitempty"`
-	Path string `json:"path"`
-}
-
 // CloudProvider abstracts cloud storage operations for testability.
 type CloudProvider interface {
 	ID() string
@@ -26,6 +19,6 @@ type CloudProvider interface {
 	Connect(callbackURL, state string) (authURL string, err error)
 	HandleCallback(code, callbackURL string) error
 	Disconnect()
-	BrowseFolders(path string) ([]FolderEntry, error)
+	BrowseFolders(path string) ([]storage.FolderEntry, error)
 	StorageProvider() storage.Provider
 }

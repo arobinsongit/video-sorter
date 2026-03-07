@@ -20,7 +20,7 @@ type mockCloudProvider struct {
 	prefix       string
 	connected    bool
 	hasCreds     bool
-	folders      []FolderEntry
+	folders      []storage.FolderEntry
 	connectURL   string
 	connectErr   error
 	callbackErr  error
@@ -65,7 +65,7 @@ func (m *mockCloudProvider) Disconnect() {
 	m.disconnected = true
 }
 
-func (m *mockCloudProvider) BrowseFolders(path string) ([]FolderEntry, error) {
+func (m *mockCloudProvider) BrowseFolders(path string) ([]storage.FolderEntry, error) {
 	if m.browseErr != nil {
 		return nil, m.browseErr
 	}
@@ -511,7 +511,7 @@ func TestCloudBrowseSuccess(t *testing.T) {
 	mock := &mockCloudProvider{
 		id: "testprov", name: "Test", prefix: "test://",
 		connected: true,
-		folders: []FolderEntry{
+		folders: []storage.FolderEntry{
 			{Name: "Photos", Path: "Photos"},
 			{Name: "Videos", Path: "Videos"},
 		},
@@ -527,7 +527,7 @@ func TestCloudBrowseSuccess(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 
-	var folders []FolderEntry
+	var folders []storage.FolderEntry
 	json.Unmarshal(w.Body.Bytes(), &folders)
 	if len(folders) != 2 {
 		t.Fatalf("folders count = %d, want 2", len(folders))
@@ -541,7 +541,7 @@ func TestCloudBrowseWithPath(t *testing.T) {
 	mock := &mockCloudProvider{
 		id: "testprov", name: "Test", prefix: "test://",
 		connected: true,
-		folders: []FolderEntry{
+		folders: []storage.FolderEntry{
 			{Name: "Subfolder", Path: "Photos/Subfolder"},
 		},
 	}
@@ -556,7 +556,7 @@ func TestCloudBrowseWithPath(t *testing.T) {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
 
-	var folders []FolderEntry
+	var folders []storage.FolderEntry
 	json.Unmarshal(w.Body.Bytes(), &folders)
 	if len(folders) != 1 || folders[0].Name != "Subfolder" {
 		t.Errorf("folders = %v, want [Subfolder]", folders)

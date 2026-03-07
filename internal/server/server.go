@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"sync"
 
 	"media-sorter/internal/storage"
 )
@@ -12,6 +13,7 @@ import (
 // Server holds the HTTP server state including cloud provider connections.
 type Server struct {
 	clouds        []CloudProvider
+	mu            sync.Mutex
 	oauthState    string
 	oauthProvider string
 	Port          int

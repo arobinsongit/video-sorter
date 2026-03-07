@@ -41,6 +41,25 @@ func CloudBase(p string) string {
 	return path.Base(rest)
 }
 
+// FolderEntry represents a folder in cloud browse results.
+type FolderEntry struct {
+	Name string `json:"name"`
+	ID   string `json:"id,omitempty"`
+	Path string `json:"path"`
+}
+
+// NormalizeBrowsePath ensures a browse path has a leading slash,
+// or returns empty string for root paths.
+func NormalizeBrowsePath(path string) string {
+	if path == "" || path == "/" {
+		return ""
+	}
+	if !strings.HasPrefix(path, "/") {
+		return "/" + path
+	}
+	return path
+}
+
 // FileInfo represents a media file in any storage backend.
 type FileInfo struct {
 	Name     string `json:"name"`

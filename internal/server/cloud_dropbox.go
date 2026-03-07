@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"media-sorter/internal/storage"
 	"media-sorter/internal/storage/dropbox"
@@ -40,7 +39,10 @@ func (p *dropboxProvider) SaveCredentials(data json.RawMessage) error {
 	if creds.ClientID == "" || creds.ClientSecret == "" {
 		return fmt.Errorf("clientId and clientSecret are required")
 	}
-	out, _ := json.MarshalIndent(creds, "", "  ")
+	out, err := json.MarshalIndent(creds, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal credentials: %w", err)
+	}
 	return os.WriteFile(dropbox.CredsPath(), out, 0600)
 }
 
@@ -74,23 +76,8 @@ func (p *dropboxProvider) Disconnect() {
 	os.Remove(dropbox.TokenPath())
 }
 
-func (p *dropboxProvider) BrowseFolders(path string) ([]FolderEntry, error) {
-	dbxPath := ""
-	if path != "" && path != "/" {
-		dbxPath = path
-		if !strings.HasPrefix(dbxPath, "/") {
-			dbxPath = "/" + dbxPath
-		}
-	}
-	entries, err := p.store.ListFolders(dbxPath)
-	if err != nil {
-		return nil, err
-	}
-	var folders []FolderEntry
-	for _, e := range entries {
-		folders = append(folders, FolderEntry{Name: e.Name, Path: e.Path})
-	}
-	return folders, nil
+func (p *dropboxProvider) BrowseFolders(path string) ([]storage.FolderEntry, error) {
+	return p.store.ListFolders(storage.NormalizeBrowsePath(path))
 }
 
 func (p *dropboxProvider) StorageProvider() storage.Provider {

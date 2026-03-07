@@ -40,7 +40,10 @@ func (p *s3Provider) SaveCredentials(data json.RawMessage) error {
 	if creds.AccessKeyID == "" || creds.SecretAccessKey == "" || creds.Region == "" {
 		return fmt.Errorf("accessKeyId, secretAccessKey, and region are required")
 	}
-	out, _ := json.MarshalIndent(creds, "", "  ")
+	out, err := json.MarshalIndent(creds, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal credentials: %w", err)
+	}
 	return os.WriteFile(s3store.CredsPath(), out, 0600)
 }
 
@@ -61,15 +64,15 @@ func (p *s3Provider) Disconnect() {
 	p.store = nil
 }
 
-func (p *s3Provider) BrowseFolders(path string) ([]FolderEntry, error) {
+func (p *s3Provider) BrowseFolders(path string) ([]storage.FolderEntry, error) {
 	if path == "" {
 		buckets, err := p.store.ListBuckets()
 		if err != nil {
 			return nil, err
 		}
-		var folders []FolderEntry
+		var folders []storage.FolderEntry
 		for _, b := range buckets {
-			folders = append(folders, FolderEntry{Name: b, Path: b})
+			folders = append(folders, storage.FolderEntry{Name: b, Path: b})
 		}
 		return folders, nil
 	}
@@ -84,14 +87,14 @@ func (p *s3Provider) BrowseFolders(path string) ([]FolderEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	var folders []FolderEntry
+	var folders []storage.FolderEntry
 	for _, f := range subfolders {
 		folderPath := bucket + "/"
 		if prefix != "" {
 			folderPath += prefix + "/"
 		}
 		folderPath += f
-		folders = append(folders, FolderEntry{Name: f, Path: folderPath})
+		folders = append(folders, storage.FolderEntry{Name: f, Path: folderPath})
 	}
 	return folders, nil
 }
