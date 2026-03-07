@@ -27,12 +27,16 @@ jobs:
           npm run build
 
       - name: Build all platforms
+        env:
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+          GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
         run: |
           mkdir -p dist
-          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/media-sorter-windows.exe .
-          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o dist/media-sorter-mac-intel .
-          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o dist/media-sorter-mac-arm .
-          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/media-sorter-linux .
+          LDFLAGS="-s -w -X main.embeddedGDriveClientID=${GDRIVE_CLIENT_ID} -X main.embeddedGDriveClientSecret=${GDRIVE_CLIENT_SECRET}"
+          GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/media-sorter-windows.exe .
+          GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/media-sorter-mac-intel .
+          GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/media-sorter-mac-arm .
+          GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/media-sorter-linux .
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

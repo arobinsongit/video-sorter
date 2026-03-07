@@ -30,8 +30,11 @@ A portable media sorting tool. Users browse videos and photos, annotate them wit
   - `cloud.js` — Cloud storage connection UI (Google Drive, S3, Dropbox, OneDrive)
 
 ### Backend files
-- `storage.go` — StorageProvider interface and LocalStorage implementation
+- `storage.go` — StorageProvider interface, LocalStorage implementation, global provider instances
 - `storage_gdrive.go` — Google Drive implementation (OAuth2, Drive API v3)
+- `storage_s3.go` — Amazon S3 implementation (AWS SDK v2, access key credentials)
+- `storage_dropbox.go` — Dropbox implementation (OAuth2, Dropbox HTTP API v2)
+- `storage_onedrive.go` — OneDrive implementation (OAuth2, Microsoft Graph API v1.0)
 
 ### Build output
 - `static/` — Built frontend files (index.html, app.min.js, favicon.svg) — committed to git so `go build` works without npm
@@ -45,8 +48,8 @@ A portable media sorting tool. Users browse videos and photos, annotate them wit
 - MRU (Most Recently Used) sorting for all group options
 - Dynamic group rendering from config — no hardcoded metadata types
 - Template-based output format with `{token}` placeholders
-- Cloud storage via StorageProvider interface — `gdrive://path` routes to Google Drive
-- Cloud credentials stored in `~/.media-sorter/` (OAuth tokens, client credentials)
+- Cloud storage via StorageProvider interface — `gdrive://`, `s3://`, `dropbox://`, `onedrive://` path prefixes
+- Cloud credentials stored in `~/.media-sorter/` (OAuth tokens, client credentials, S3 access keys)
 
 ## Config Format
 
@@ -96,7 +99,8 @@ Output modes: `rename` (in place), `move` (to outputFolder), `copy` (to outputFo
 | `/api/user-settings` | GET/POST | Read/write user settings |
 | `/api/open-folder?dir=` | GET | Open directory in OS file explorer |
 | `/api/cloud/providers` | GET | List cloud providers and connection status |
-| `/api/cloud/connect` | POST | Initiate OAuth flow `{provider}` |
+| `/api/cloud/credentials` | POST | Save provider credentials from UI `{provider, credentials}` |
+| `/api/cloud/connect` | POST | Initiate OAuth flow or direct connect `{provider}` |
 | `/api/cloud/disconnect` | POST | Remove stored credentials `{provider}` |
 | `/api/cloud/browse?provider=&path=` | GET | Browse cloud folder structure |
 | `/api/cloud/callback` | GET | OAuth callback handler |
@@ -109,11 +113,11 @@ Output modes: `rename` (in place), `move` (to outputFolder), `copy` (to outputFo
 # Dev: build frontend + Go binary (Windows)
 npm install          # first time only
 npm run build        # bundles JS, copies HTML/favicon to static/
-go build -o media-sorter.exe . && ./media-sorter.exe
+go build -ldflags "-X main.embeddedGDriveClientID=$GDRIVE_CLIENT_ID -X main.embeddedGDriveClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter.exe . && ./media-sorter.exe
 
 # Dev: build frontend + Go binary (Mac/Linux)
 npm install && npm run build
-go build -o media-sorter . && ./media-sorter
+go build -ldflags "-X main.embeddedGDriveClientID=$GDRIVE_CLIENT_ID -X main.embeddedGDriveClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter . && ./media-sorter
 
 # Cross-platform release builds
 bash build.sh        # from Mac/Linux
