@@ -10,9 +10,20 @@ A portable media sorting tool. Users browse videos and photos, annotate them wit
 
 **Single-binary web app:** Go backend with `embed.FS` serves a bundled frontend via local HTTP on a random port, then auto-opens the browser. Frontend is built with esbuild (minified + bundled), embedded at compile time.
 
-### Backend
-- `main.go` — HTTP server, REST API endpoints, JSON config management, session persistence, file operations (rename/move/copy)
-- Uses `//go:embed all:static` to embed the built frontend
+### Backend (`cmd/` + `internal/`)
+- `cmd/media-sorter/main.go` — Entry point, server startup, browser launch, `//go:embed` for static assets
+- `internal/server/` — HTTP server, API handlers, config management:
+  - `server.go` — Server struct, route registration, provider routing, JSON helpers
+  - `api.go` — Core API handlers (list, media, config, rename, open-folder)
+  - `api_cloud.go` — Cloud API handlers (providers, credentials, connect, disconnect, browse, OAuth callback)
+  - `api_session.go` — Session and user settings handlers
+  - `config.go` — ProjectConfig types, load/save/migrate, legacy format parsing
+- `internal/storage/` — Storage abstraction layer:
+  - `storage.go` — Provider interface, FileInfo, MediaExts, LocalStorage, cloud path helpers (CloudJoin/CloudDir/CloudBase)
+  - `gdrive/` — Google Drive provider (OAuth2, Drive API v3, embedded credentials via ldflags)
+  - `s3/` — Amazon S3 provider (AWS SDK v2, access key credentials)
+  - `dropbox/` — Dropbox provider (OAuth2, Dropbox HTTP API v2)
+  - `onedrive/` — OneDrive provider (OAuth2, Microsoft Graph API v1.0)
 
 ### Frontend (source in `frontend/`)
 - `frontend/index.html` — HTML shell with Tailwind CSS via CDN
@@ -29,15 +40,8 @@ A portable media sorting tool. Users browse videos and photos, annotate them wit
   - `utils.js` — MRU helpers, formatSize, clearChildren
   - `cloud.js` — Cloud storage connection UI (Google Drive, S3, Dropbox, OneDrive)
 
-### Backend files
-- `storage.go` — StorageProvider interface, LocalStorage implementation, global provider instances
-- `storage_gdrive.go` — Google Drive implementation (OAuth2, Drive API v3)
-- `storage_s3.go` — Amazon S3 implementation (AWS SDK v2, access key credentials)
-- `storage_dropbox.go` — Dropbox implementation (OAuth2, Dropbox HTTP API v2)
-- `storage_onedrive.go` — OneDrive implementation (OAuth2, Microsoft Graph API v1.0)
-
 ### Build output
-- `static/` — Built frontend files (index.html, app.min.js, favicon.svg) — committed to git so `go build` works without npm
+- `cmd/media-sorter/static/` — Built frontend files (index.html, app.min.js, favicon.svg) — committed to git so `go build` works without npm
 - `dist/` — Release binaries (gitignored)
 
 **Key patterns:**
@@ -112,14 +116,14 @@ Output modes: `rename` (in place), `move` (to outputFolder), `copy` (to outputFo
 
 # Dev: build frontend + Go binary (Windows)
 npm install          # first time only
-npm run build        # bundles JS, copies HTML/favicon to static/
+npm run build        # bundles JS, copies HTML/favicon to cmd/media-sorter/static/
 source .env.local    # loads GDRIVE_CLIENT_ID and GDRIVE_CLIENT_SECRET
-go build -ldflags "-X main.embeddedGDriveClientID=$GDRIVE_CLIENT_ID -X main.embeddedGDriveClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter.exe . && ./media-sorter.exe
+go build -ldflags "-X video-sorter/internal/storage/gdrive.embeddedClientID=$GDRIVE_CLIENT_ID -X video-sorter/internal/storage/gdrive.embeddedClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter.exe ./cmd/media-sorter && ./media-sorter.exe
 
 # Dev: build frontend + Go binary (Mac/Linux)
 npm install && npm run build
 source .env.local
-go build -ldflags "-X main.embeddedGDriveClientID=$GDRIVE_CLIENT_ID -X main.embeddedGDriveClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter . && ./media-sorter
+go build -ldflags "-X video-sorter/internal/storage/gdrive.embeddedClientID=$GDRIVE_CLIENT_ID -X video-sorter/internal/storage/gdrive.embeddedClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter ./cmd/media-sorter && ./media-sorter
 
 # Cross-platform release builds
 bash build.sh        # from Mac/Linux
@@ -128,7 +132,7 @@ build.bat            # from Windows
 
 **Important on Windows:** Kill existing processes before rebuilding:
 ```bash
-taskkill //F //IM media-sorter.exe 2>/dev/null; source .env.local && npm run build && go build -ldflags "-X main.embeddedGDriveClientID=$GDRIVE_CLIENT_ID -X main.embeddedGDriveClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter.exe .
+taskkill //F //IM media-sorter.exe 2>/dev/null; source .env.local && npm run build && go build -ldflags "-X video-sorter/internal/storage/gdrive.embeddedClientID=$GDRIVE_CLIENT_ID -X video-sorter/internal/storage/gdrive.embeddedClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter.exe ./cmd/media-sorter
 ```
 
 **Google Drive credentials:** `.env.local` (gitignored) holds `GDRIVE_CLIENT_ID` and `GDRIVE_CLIENT_SECRET` for local builds. CI uses GitHub repository secrets.

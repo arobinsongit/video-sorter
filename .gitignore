@@ -1,9 +1,9 @@
 .env.local
-media-sorter.exe
-media-sorter.exe~
-media-sorter
-video-sorter.exe
-video-sorter
+/media-sorter.exe
+/media-sorter.exe~
+/media-sorter
+/video-sorter.exe
+/video-sorter
 dist/
 node_modules/
 .playwright-mcp/

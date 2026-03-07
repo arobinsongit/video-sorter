@@ -1,4 +1,4 @@
-package main
+package storage
 
 import (
 	"io"
@@ -10,34 +10,34 @@ import (
 	"strings"
 )
 
-// splitScheme splits "scheme://rest" into ("scheme://", "rest").
+// SplitScheme splits "scheme://rest" into ("scheme://", "rest").
 // If no scheme, returns ("", p).
-func splitScheme(p string) (scheme, rest string) {
+func SplitScheme(p string) (scheme, rest string) {
 	if idx := strings.Index(p, "://"); idx >= 0 {
 		return p[:idx+3], p[idx+3:]
 	}
 	return "", p
 }
 
-// cloudJoin joins cloud path segments using forward slashes, preserving the URL scheme.
-func cloudJoin(parts ...string) string {
+// CloudJoin joins cloud path segments using forward slashes, preserving the URL scheme.
+func CloudJoin(parts ...string) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	scheme, first := splitScheme(parts[0])
+	scheme, first := SplitScheme(parts[0])
 	parts[0] = first
 	return scheme + path.Join(parts...)
 }
 
-// cloudDir returns the directory portion of a cloud path, preserving the URL scheme.
-func cloudDir(p string) string {
-	scheme, rest := splitScheme(p)
+// CloudDir returns the directory portion of a cloud path, preserving the URL scheme.
+func CloudDir(p string) string {
+	scheme, rest := SplitScheme(p)
 	return scheme + path.Dir(rest)
 }
 
-// cloudBase returns the filename portion of a cloud path.
-func cloudBase(p string) string {
-	_, rest := splitScheme(p)
+// CloudBase returns the filename portion of a cloud path.
+func CloudBase(p string) string {
+	_, rest := SplitScheme(p)
 	return path.Base(rest)
 }
 
@@ -48,41 +48,22 @@ type FileInfo struct {
 	Modified string `json:"modified"`
 }
 
-// StorageProvider abstracts file operations across local and cloud storage.
-type StorageProvider interface {
-	// ListFiles returns media files at the given path.
+// Provider abstracts file operations across local and cloud storage.
+type Provider interface {
 	ListFiles(path string) ([]FileInfo, error)
-
-	// ServeFile writes the file content to the HTTP response (supports range requests for local).
 	ServeFile(w http.ResponseWriter, r *http.Request, dir, file string)
-
-	// ReadFile reads a file's contents.
 	ReadFile(path string) ([]byte, error)
-
-	// WriteFile writes data to a file.
 	WriteFile(path string, data []byte) error
-
-	// Rename renames a file within the same directory.
 	Rename(dir, oldName, newName string) error
-
-	// MoveFile moves a file to a new path (potentially cross-directory).
 	MoveFile(oldPath, newPath string) error
-
-	// CopyFile copies a file to a new path.
 	CopyFile(oldPath, newPath string) error
-
-	// FileExists checks if a file exists.
 	FileExists(path string) bool
-
-	// MkdirAll creates a directory tree.
 	MkdirAll(path string) error
-
-	// IsLocal returns true if this is a local filesystem provider.
 	IsLocal() bool
 }
 
-// mediaExts defines supported media file extensions.
-var mediaExts = map[string]bool{
+// MediaExts defines supported media file extensions.
+var MediaExts = map[string]bool{
 	// Video
 	".mp4": true, ".mov": true, ".avi": true, ".mkv": true, ".webm": true,
 	// Photo
@@ -90,7 +71,18 @@ var mediaExts = map[string]bool{
 	".bmp": true, ".tiff": true, ".tif": true, ".heic": true, ".heif": true,
 }
 
-// LocalStorage implements StorageProvider for the local filesystem.
+// CredentialsDir returns the directory for storing credentials.
+func CredentialsDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "."
+	}
+	dir := filepath.Join(home, ".media-sorter")
+	os.MkdirAll(dir, 0700)
+	return dir
+}
+
+// LocalStorage implements Provider for the local filesystem.
 type LocalStorage struct{}
 
 func (l *LocalStorage) ListFiles(dir string) ([]FileInfo, error) {
@@ -105,7 +97,7 @@ func (l *LocalStorage) ListFiles(dir string) ([]FileInfo, error) {
 			continue
 		}
 		ext := strings.ToLower(filepath.Ext(e.Name()))
-		if mediaExts[ext] {
+		if MediaExts[ext] {
 			info, err := e.Info()
 			if err != nil {
 				continue
@@ -147,8 +139,7 @@ func (l *LocalStorage) Rename(dir, oldName, newName string) error {
 
 func (l *LocalStorage) MoveFile(oldPath, newPath string) error {
 	if err := os.Rename(oldPath, newPath); err != nil {
-		// Cross-filesystem: fall back to copy+delete
-		if err := copyFileLocal(oldPath, newPath); err != nil {
+		if err := CopyFileLocal(oldPath, newPath); err != nil {
 			return err
 		}
 		return os.Remove(oldPath)
@@ -157,7 +148,7 @@ func (l *LocalStorage) MoveFile(oldPath, newPath string) error {
 }
 
 func (l *LocalStorage) CopyFile(oldPath, newPath string) error {
-	return copyFileLocal(oldPath, newPath)
+	return CopyFileLocal(oldPath, newPath)
 }
 
 func (l *LocalStorage) FileExists(path string) bool {
@@ -173,7 +164,8 @@ func (l *LocalStorage) IsLocal() bool {
 	return true
 }
 
-func copyFileLocal(src, dst string) error {
+// CopyFileLocal copies a file on the local filesystem.
+func CopyFileLocal(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -189,39 +181,3 @@ func copyFileLocal(src, dst string) error {
 	}
 	return out.Close()
 }
-
-// getStorageProvider returns the appropriate storage provider for a path.
-// Cloud paths use prefixes like "gdrive://", "s3://", "dropbox://", "onedrive://".
-// All other paths use local filesystem.
-func getStorageProvider(path string) StorageProvider {
-	switch {
-	case strings.HasPrefix(path, "gdrive://"):
-		if gdrive != nil {
-			return gdrive
-		}
-		return &LocalStorage{}
-	case strings.HasPrefix(path, "s3://"):
-		if s3store != nil {
-			return s3store
-		}
-		return &LocalStorage{}
-	case strings.HasPrefix(path, "dropbox://"):
-		if dropbox != nil {
-			return dropbox
-		}
-		return &LocalStorage{}
-	case strings.HasPrefix(path, "onedrive://"):
-		if onedrive != nil {
-			return onedrive
-		}
-		return &LocalStorage{}
-	default:
-		return &LocalStorage{}
-	}
-}
-
-// Global cloud storage providers (nil if not connected).
-var gdrive *GoogleDriveStorage
-var s3store *S3Storage
-var dropbox *DropboxStorage
-var onedrive *OneDriveStorage
