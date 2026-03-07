@@ -6,17 +6,20 @@ npm run build
 
 mkdir -p dist
 
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+LDFLAGS="-s -w -X main.version=${VERSION}"
+
 echo "[1/4] Windows (amd64)..."
-GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/media-sorter-windows.exe .
+GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/media-sorter-windows.exe ./cmd/media-sorter
 
 echo "[2/4] Mac Intel (amd64)..."
-GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o dist/media-sorter-mac-intel .
+GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/media-sorter-mac-intel ./cmd/media-sorter
 
 echo "[3/4] Mac Apple Silicon (arm64)..."
-GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o dist/media-sorter-mac-arm .
+GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/media-sorter-mac-arm ./cmd/media-sorter
 
 echo "[4/4] Linux (amd64)..."
-GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/media-sorter-linux .
+GOOS=linux GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/media-sorter-linux ./cmd/media-sorter
 
 echo ""
 echo "Done! Builds are in the dist/ folder:"
