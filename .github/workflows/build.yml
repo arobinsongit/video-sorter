@@ -26,6 +26,12 @@ jobs:
           npm install
           npm run build
 
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
       - name: Build all platforms
         env:
           GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
