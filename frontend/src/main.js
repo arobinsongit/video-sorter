@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { fetchVideos, loadConfig, renameVideo, saveSession, loadSession, loadUserSettings, openFolder } from './api.js';
+import { fetchFiles, loadConfig, renameFile, saveSession, loadSession, loadUserSettings, openFolder } from './api.js';
 import { setupThemeToggle } from './theme.js';
 import { setupModal, isModalOpen } from './modal.js';
 import { renderAllGroups } from './groups.js';
@@ -7,11 +7,11 @@ import { updatePreview, parseAnnotations } from './preview.js';
 import { setupFileList, renderFileList } from './fileList.js';
 import { setupConfigEditor } from './configEditor.js';
 
-function parseVideoList(data) {
-  state.videoMeta = {};
-  if (!data || data.error) { state.videos = []; return; }
-  state.videos = data.map(v => v.name);
-  data.forEach(v => { state.videoMeta[v.name] = { size: v.size, modified: v.modified }; });
+function parseFileList(data) {
+  state.fileMeta = {};
+  if (!data || data.error) { state.files = []; return; }
+  state.files = data.map(v => v.name);
+  data.forEach(v => { state.fileMeta[v.name] = { size: v.size, modified: v.modified }; });
 }
 
 function clearSelections() {
@@ -28,27 +28,27 @@ function resetSelections() {
   updatePreview();
 }
 
-function selectVideo(index) {
+function selectFile(index) {
   state.currentIndex = index;
-  const name = state.videos[index];
-  const video = document.getElementById('videoPlayer');
-  const noVideo = document.getElementById('noVideo');
+  const name = state.files[index];
+  const player = document.getElementById('videoPlayer');
+  const noMedia = document.getElementById('noVideo');
 
   clearSelections();
   parseAnnotations(name);
   renderAllGroups();
   updatePreview();
 
-  noVideo.style.display = 'none';
-  video.style.display = '';
+  noMedia.style.display = 'none';
+  player.style.display = '';
   document.getElementById('currentFileName').textContent = name;
-  video.src = '/api/video?dir=' + encodeURIComponent(state.currentDir) + '&file=' + encodeURIComponent(name);
-  video.load();
-  video.play().catch(() => {});
+  player.src = '/api/media?dir=' + encodeURIComponent(state.currentDir) + '&file=' + encodeURIComponent(name);
+  player.load();
+  player.play().catch(() => {});
 
   document.getElementById('btnPrev').disabled = index === 0;
-  document.getElementById('btnNext').disabled = index >= state.videos.length - 1;
-  document.getElementById('navInfo').textContent = (index + 1) + ' / ' + state.videos.length;
+  document.getElementById('btnNext').disabled = index >= state.files.length - 1;
+  document.getElementById('navInfo').textContent = (index + 1) + ' / ' + state.files.length;
 
   renderFileList();
 
@@ -65,20 +65,20 @@ async function loadFolder() {
   state.currentDir = dir;
 
   try {
-    const data = await fetchVideos(dir);
+    const data = await fetchFiles(dir);
     if (data.error) { alert(data.error); return; }
-    parseVideoList(data);
-    document.getElementById('fileCounter').textContent = state.videos.length + ' videos';
+    parseFileList(data);
+    document.getElementById('fileCounter').textContent = state.files.length + ' files';
     await loadConfig();
     renderAllGroups();
     renderFileList();
-    if (state.videos.length > 0) {
-      selectVideo(0);
+    if (state.files.length > 0) {
+      selectFile(0);
     } else {
       state.currentIndex = -1;
       document.getElementById('noVideo').style.display = '';
       document.getElementById('videoPlayer').style.display = 'none';
-      document.getElementById('currentFileName').textContent = 'No videos found';
+      document.getElementById('currentFileName').textContent = 'No files found';
     }
     saveSession();
   } catch (e) {
@@ -101,20 +101,20 @@ async function restoreSession() {
     if (session.dir) {
       document.getElementById('dirInput').value = session.dir;
       state.currentDir = session.dir;
-      const data = await fetchVideos(session.dir);
+      const data = await fetchFiles(session.dir);
       if (data.error) return;
-      parseVideoList(data);
-      document.getElementById('fileCounter').textContent = state.videos.length + ' videos';
+      parseFileList(data);
+      document.getElementById('fileCounter').textContent = state.files.length + ' files';
       await loadConfig();
       renderAllGroups();
       renderFileList();
-      if (state.videos.length > 0) {
+      if (state.files.length > 0) {
         let idx = 0;
         if (session.file) {
-          const found = state.videos.indexOf(session.file);
+          const found = state.files.indexOf(session.file);
           if (found >= 0) idx = found;
         }
-        selectVideo(idx);
+        selectFile(idx);
       }
     }
   } catch (e) {}
@@ -122,26 +122,26 @@ async function restoreSession() {
 
 async function applyRename() {
   if (state.currentIndex < 0) return;
-  const video = document.getElementById('videoPlayer');
-  const oldName = state.videos[state.currentIndex];
+  const player = document.getElementById('videoPlayer');
+  const oldName = state.files[state.currentIndex];
   const newName = document.getElementById('previewName').textContent;
   if (oldName === newName) return;
 
   // Release file lock before renaming (Windows)
-  video.pause();
-  video.removeAttribute('src');
-  video.load();
+  player.pause();
+  player.removeAttribute('src');
+  player.load();
   await new Promise(r => setTimeout(r, 100));
 
   try {
-    const data = await renameVideo(oldName, newName);
+    const data = await renameFile(oldName, newName);
     if (data.error) { alert('Rename failed: ' + data.error); return; }
-    state.videos[state.currentIndex] = newName;
+    state.files[state.currentIndex] = newName;
     saveSession();
-    if (state.currentIndex < state.videos.length - 1) {
-      selectVideo(state.currentIndex + 1);
+    if (state.currentIndex < state.files.length - 1) {
+      selectFile(state.currentIndex + 1);
     } else {
-      selectVideo(state.currentIndex);
+      selectFile(state.currentIndex);
     }
   } catch (e) {
     alert('Rename failed: ' + e.message);
@@ -179,7 +179,7 @@ function init() {
 
   setupThemeToggle(() => renderAllGroups());
   setupModal();
-  setupFileList(selectVideo);
+  setupFileList(selectFile);
   setupConfigEditor();
   setupSplitter();
 
@@ -190,12 +190,12 @@ function init() {
     if (dir) openFolder(dir);
   });
 
-  btnPrev.addEventListener('click', () => { if (state.currentIndex > 0) selectVideo(state.currentIndex - 1); });
-  btnNext.addEventListener('click', () => { if (state.currentIndex < state.videos.length - 1) selectVideo(state.currentIndex + 1); });
+  btnPrev.addEventListener('click', () => { if (state.currentIndex > 0) selectFile(state.currentIndex - 1); });
+  btnNext.addEventListener('click', () => { if (state.currentIndex < state.files.length - 1) selectFile(state.currentIndex + 1); });
 
   btnApply.addEventListener('click', applyRename);
   document.getElementById('btnSkip').addEventListener('click', () => {
-    if (state.currentIndex < state.videos.length - 1) selectVideo(state.currentIndex + 1);
+    if (state.currentIndex < state.files.length - 1) selectFile(state.currentIndex + 1);
   });
   document.getElementById('btnReset').addEventListener('click', resetSelections);
 

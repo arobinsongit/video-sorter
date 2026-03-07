@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-A portable video sorting tool for videographers. Users watch short sports videos, annotate them with configurable metadata groups (subjects, tags, quality, or any custom group), then the app renames/moves/copies files encoding metadata into the filename (e.g., `clip__S88__double_slide__great.mp4`). Single binary, cross-platform, opens in browser.
+A portable media sorting tool. Users browse videos and photos, annotate them with configurable metadata groups (subjects, tags, quality, or any custom group), then the app renames/moves/copies files encoding metadata into the filename (e.g., `clip__S88__double_slide__great.mp4`). Single binary, cross-platform, opens in browser. Supports video (.mp4, .mov, .avi, .mkv, .webm) and photo (.jpg, .jpeg, .png, .gif, .webp, .bmp, .tiff, .heic, .heif) files.
 
 ## Architecture
 
@@ -17,7 +17,7 @@ A portable video sorting tool for videographers. Users watch short sports videos
 ### Frontend (source in `frontend/`)
 - `frontend/index.html` — HTML shell with Tailwind CSS via CDN
 - `frontend/src/` — ES modules bundled by esbuild:
-  - `main.js` — Entry point, initialization, video player, keyboard shortcuts
+  - `main.js` — Entry point, initialization, media player, keyboard shortcuts
   - `state.js` — Shared state object
   - `api.js` — All fetch wrappers for backend endpoints
   - `groups.js` — Dynamic metadata group rendering (multi-select, single-select, slider)
@@ -33,17 +33,17 @@ A portable video sorting tool for videographers. Users watch short sports videos
 - `dist/` — Release binaries (gitignored)
 
 **Key patterns:**
-- Config stored as `video-sorter-config.json` per video folder (auto-migrates from old `.txt` format)
-- Session persisted to `~/.video-sorter-session.json` (remembers last directory, file, MRU order per group)
-- User settings at `~/.video-sorter-settings.json` (theme, keybindings)
-- Video must be unloaded (`pause()` + remove `src` + `load()`) before rename on Windows due to file locking
+- Config stored as `media-sorter-config.json` per media folder (auto-migrates from `video-sorter-config.json` and old `.txt` format)
+- Session persisted to `~/.media-sorter-session.json` (remembers last directory, file, MRU order per group)
+- User settings at `~/.media-sorter-settings.json` (theme, keybindings)
+- Media player must be unloaded (`pause()` + remove `src` + `load()`) before rename on Windows due to file locking
 - MRU (Most Recently Used) sorting for all group options
 - Dynamic group rendering from config — no hardcoded metadata types
 - Template-based output format with `{token}` placeholders
 
 ## Config Format
 
-Stored as `video-sorter-config.json` in the video folder:
+Stored as `media-sorter-config.json` in the media folder:
 ```json
 {
   "version": 1,
@@ -79,11 +79,11 @@ Output modes: `rename` (in place), `move` (to outputFolder), `copy` (to outputFo
 | Endpoint | Method | Purpose |
 |---|---|---|
 | `/` | GET | Serve embedded frontend |
-| `/api/list?dir=` | GET | List video files with metadata |
-| `/api/video?dir=&file=` | GET | Serve video file for playback |
-| `/api/config?dir=` | GET | Read JSON config (auto-migrates from .txt) |
+| `/api/list?dir=` | GET | List media files with metadata |
+| `/api/media?dir=&file=` | GET | Serve media file for playback |
+| `/api/config?dir=` | GET | Read JSON config (auto-migrates from legacy formats) |
 | `/api/config/save` | POST | Write JSON config `{dir, config}` |
-| `/api/rename` | POST | Rename/move/copy video `{dir, oldName, newName, outputMode, outputFolder}` |
+| `/api/rename` | POST | Rename/move/copy file `{dir, oldName, newName, outputMode, outputFolder}` |
 | `/api/session` | GET | Load session state |
 | `/api/session/save` | POST | Save session state |
 | `/api/user-settings` | GET/POST | Read/write user settings |
@@ -97,11 +97,11 @@ Output modes: `rename` (in place), `move` (to outputFolder), `copy` (to outputFo
 # Dev: build frontend + Go binary (Windows)
 npm install          # first time only
 npm run build        # bundles JS, copies HTML/favicon to static/
-go build -o video-sorter.exe . && ./video-sorter.exe
+go build -o media-sorter.exe . && ./media-sorter.exe
 
 # Dev: build frontend + Go binary (Mac/Linux)
 npm install && npm run build
-go build -o video-sorter . && ./video-sorter
+go build -o media-sorter . && ./media-sorter
 
 # Cross-platform release builds
 bash build.sh        # from Mac/Linux
@@ -110,7 +110,7 @@ build.bat            # from Windows
 
 **Important on Windows:** Kill existing processes before rebuilding:
 ```bash
-taskkill //F //IM video-sorter.exe 2>/dev/null; npm run build && go build -o video-sorter.exe .
+taskkill //F //IM media-sorter.exe 2>/dev/null; npm run build && go build -o media-sorter.exe .
 ```
 
 ## Filename Encoding Format
@@ -154,6 +154,6 @@ To use an env var instead, change the push user line to e.g. `ENV:GH_REPO_USER`.
 
 - ES modules bundled by esbuild into single minified `app.min.js`
 - Tailwind CSS via CDN — no build step for CSS
-- All state centralized in `state.js` — plain object with videos, config, selections, MRU
+- All state centralized in `state.js` — plain object with files, config, selections, MRU
 - Dynamic group rendering — `groups.js` generates UI from config definition
 - No framework dependencies — vanilla JS with DOM APIs

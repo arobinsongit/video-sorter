@@ -3,10 +3,10 @@ import { clearChildren, formatSize } from './utils.js';
 import { isDark } from './theme.js';
 
 let sortCol = 'name', sortAsc = true;
-let onSelectVideo = null;
+let onSelectFile = null;
 
-export function setupFileList(selectVideoFn) {
-  onSelectVideo = selectVideoFn;
+export function setupFileList(selectFileFn) {
+  onSelectFile = selectFileFn;
   document.getElementById('colName').addEventListener('click', () => toggleSort('name'));
   document.getElementById('colSize').addEventListener('click', () => toggleSort('size'));
   document.getElementById('colDate').addEventListener('click', () => toggleSort('date'));
@@ -30,15 +30,15 @@ function updateSortIndicators() {
 
 function getFilteredSorted() {
   const filter = (document.getElementById('fileFilter').value || '').toLowerCase();
-  let indices = state.videos.map((_, i) => i);
+  let indices = state.files.map((_, i) => i);
   if (filter) {
-    indices = indices.filter(i => state.videos[i].toLowerCase().includes(filter));
+    indices = indices.filter(i => state.files[i].toLowerCase().includes(filter));
   }
   indices.sort((a, b) => {
-    const ma = state.videoMeta[state.videos[a]] || {};
-    const mb = state.videoMeta[state.videos[b]] || {};
+    const ma = state.fileMeta[state.files[a]] || {};
+    const mb = state.fileMeta[state.files[b]] || {};
     let cmp = 0;
-    if (sortCol === 'name') cmp = state.videos[a].toLowerCase().localeCompare(state.videos[b].toLowerCase());
+    if (sortCol === 'name') cmp = state.files[a].toLowerCase().localeCompare(state.files[b].toLowerCase());
     else if (sortCol === 'size') cmp = (ma.size || 0) - (mb.size || 0);
     else if (sortCol === 'date') cmp = (ma.modified || '').localeCompare(mb.modified || '');
     return sortAsc ? cmp : -cmp;
@@ -51,8 +51,8 @@ export function renderFileList() {
   clearChildren(tbody);
   const indices = getFilteredSorted();
   indices.forEach(i => {
-    const name = state.videos[i];
-    const meta = state.videoMeta[name] || {};
+    const name = state.files[i];
+    const meta = state.fileMeta[name] || {};
     const active = i === state.currentIndex;
     const row = document.createElement('tr');
     row.className = 'cursor-pointer transition-colors ' +
@@ -75,7 +75,7 @@ export function renderFileList() {
     row.appendChild(nameTd);
     row.appendChild(sizeTd);
     row.appendChild(dateTd);
-    row.addEventListener('click', () => { if (onSelectVideo) onSelectVideo(i); });
+    row.addEventListener('click', () => { if (onSelectFile) onSelectFile(i); });
     tbody.appendChild(row);
   });
 }

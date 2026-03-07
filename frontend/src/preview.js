@@ -17,7 +17,7 @@ export function updatePreview() {
     return;
   }
 
-  const original = state.videos[state.currentIndex];
+  const original = state.files[state.currentIndex];
   const dotIdx = original.lastIndexOf('.');
   const ext = original.substring(dotIdx + 1);
   const baseName = getBaseName(original);
