@@ -443,14 +443,8 @@ func (o *Storage) IsLocal() bool {
 	return false
 }
 
-// FolderEntry represents a folder in the browse UI.
-type FolderEntry struct {
-	Name string
-	Path string
-}
-
 // ListFolders lists folders at a given path for the browse UI.
-func (o *Storage) ListFolders(path string) ([]FolderEntry, error) {
+func (o *Storage) ListFolders(path string) ([]storage.FolderEntry, error) {
 	var url string
 	if path == "" || path == "/" {
 		url = "https://graph.microsoft.com/v1.0/me/drive/root/children?$filter=folder ne null"
@@ -474,7 +468,7 @@ func (o *Storage) ListFolders(path string) ([]FolderEntry, error) {
 		return nil, err
 	}
 
-	var folders []FolderEntry
+	var folders []storage.FolderEntry
 	for _, item := range result.Value {
 		if item.Folder == nil {
 			continue
@@ -483,7 +477,7 @@ func (o *Storage) ListFolders(path string) ([]FolderEntry, error) {
 		if path != "" && path != "/" {
 			itemPath = strings.TrimRight(path, "/") + "/" + item.Name
 		}
-		folders = append(folders, FolderEntry{Name: item.Name, Path: itemPath})
+		folders = append(folders, storage.FolderEntry{Name: item.Name, Path: itemPath})
 	}
 	return folders, nil
 }

@@ -300,6 +300,27 @@ func TestLocalStorageIsLocal(t *testing.T) {
 	}
 }
 
+func TestNormalizeBrowsePath(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{"/", ""},
+		{"Photos", "/Photos"},
+		{"/Photos", "/Photos"},
+		{"Photos/Vacation", "/Photos/Vacation"},
+		{"/Photos/Vacation", "/Photos/Vacation"},
+	}
+
+	for _, tt := range tests {
+		got := NormalizeBrowsePath(tt.input)
+		if got != tt.want {
+			t.Errorf("NormalizeBrowsePath(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestCopyFileLocal(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "src.bin")

@@ -83,7 +83,7 @@ func (p *gdriveProvider) Disconnect() {
 	os.Remove(gdrive.TokenPath())
 }
 
-func (p *gdriveProvider) BrowseFolders(path string) ([]FolderEntry, error) {
+func (p *gdriveProvider) BrowseFolders(path string) ([]storage.FolderEntry, error) {
 	folderID := "root"
 	if path != "" && path != "/" {
 		var err error
@@ -100,13 +100,13 @@ func (p *gdriveProvider) BrowseFolders(path string) ([]FolderEntry, error) {
 		return nil, err
 	}
 
-	var folders []FolderEntry
+	var folders []storage.FolderEntry
 	for _, f := range result.Files {
 		entryPath := f.Name
 		if path != "" && path != "/" {
 			entryPath = strings.TrimRight(path, "/") + "/" + f.Name
 		}
-		folders = append(folders, FolderEntry{
+		folders = append(folders, storage.FolderEntry{
 			Name: f.Name,
 			ID:   f.Id,
 			Path: entryPath,

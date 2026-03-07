@@ -25,7 +25,7 @@ func (s *Server) handleCloudProviders(w http.ResponseWriter, r *http.Request) {
 		HasCreds  bool   `json:"hasCreds"`
 	}
 
-	var providers []ProviderStatus
+	providers := make([]ProviderStatus, 0, len(s.clouds))
 	for _, c := range s.clouds {
 		providers = append(providers, ProviderStatus{
 			ID:        c.ID(),
@@ -87,10 +87,10 @@ func (s *Server) handleCloudConnect(w http.ResponseWriter, r *http.Request) {
 
 	callbackURL := fmt.Sprintf("http://127.0.0.1:%d/api/cloud/callback", s.Port)
 	stateBytes := make([]byte, 16)
-	rand.Read(stateBytes)
-	s.oauthState = hex.EncodeToString(stateBytes)
+	_, _ = rand.Read(stateBytes)
+	state := hex.EncodeToString(stateBytes)
 
-	authURL, err := cloud.Connect(callbackURL, s.oauthState)
+	authURL, err := cloud.Connect(callbackURL, state)
 	if err != nil {
 		jsonError(w, err.Error(), 400)
 		return
@@ -100,24 +100,33 @@ func (s *Server) handleCloudConnect(w http.ResponseWriter, r *http.Request) {
 		// Direct connect (e.g., S3)
 		jsonOK(w, map[string]string{"status": "connected"})
 	} else {
+		s.mu.Lock()
+		s.oauthState = state
 		s.oauthProvider = req.Provider
+		s.mu.Unlock()
 		jsonOK(w, map[string]string{"authURL": authURL})
 	}
 }
 
 func (s *Server) handleCloudCallback(w http.ResponseWriter, r *http.Request) {
 	state := r.URL.Query().Get("state")
-	if state != s.oauthState {
+	code := r.URL.Query().Get("code")
+
+	s.mu.Lock()
+	expectedState := s.oauthState
+	providerID := s.oauthProvider
+	s.mu.Unlock()
+
+	if state != expectedState {
 		http.Error(w, "Invalid state parameter", http.StatusBadRequest)
 		return
 	}
-	code := r.URL.Query().Get("code")
 	if code == "" {
 		http.Error(w, "No code provided", http.StatusBadRequest)
 		return
 	}
 
-	cloud := s.cloudByID(s.oauthProvider)
+	cloud := s.cloudByID(providerID)
 	if cloud == nil {
 		http.Error(w, "Unknown OAuth provider", http.StatusBadRequest)
 		return
@@ -129,8 +138,10 @@ func (s *Server) handleCloudCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.mu.Lock()
 	s.oauthState = ""
 	s.oauthProvider = ""
+	s.mu.Unlock()
 
 	w.Header().Set("Content-Type", "text/html")
 	w.Write([]byte(fmt.Sprintf(`<!DOCTYPE html><html><body>
