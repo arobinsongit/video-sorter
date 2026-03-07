@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"strings"
 
-	"video-sorter/internal/storage"
-	"video-sorter/internal/storage/dropbox"
-	"video-sorter/internal/storage/gdrive"
-	"video-sorter/internal/storage/onedrive"
-	s3store "video-sorter/internal/storage/s3"
+	"media-sorter/internal/storage"
+	"media-sorter/internal/storage/dropbox"
+	"media-sorter/internal/storage/gdrive"
+	"media-sorter/internal/storage/onedrive"
+	s3store "media-sorter/internal/storage/s3"
 )
 
 // Server holds the HTTP server state including cloud provider connections.

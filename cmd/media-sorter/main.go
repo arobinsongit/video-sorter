@@ -10,7 +10,7 @@ import (
 	"os/exec"
 	"runtime"
 
-	"video-sorter/internal/server"
+	"media-sorter/internal/server"
 )
 
 //go:embed all:static

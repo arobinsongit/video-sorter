@@ -45,7 +45,7 @@ A portable media sorting tool. Users browse videos and photos, annotate them wit
 - `dist/` — Release binaries (gitignored)
 
 **Key patterns:**
-- Config stored as `media-sorter-config.json` per media folder (auto-migrates from `video-sorter-config.json` and old `.txt` format)
+- Config stored as `media-sorter-config.json` per media folder
 - Session persisted to `~/.media-sorter-session.json` (remembers last directory, file, MRU order per group)
 - User settings at `~/.media-sorter-settings.json` (theme, keybindings)
 - Media player must be unloaded (`pause()` + remove `src` + `load()`) before rename on Windows due to file locking
@@ -118,21 +118,26 @@ Output modes: `rename` (in place), `move` (to outputFolder), `copy` (to outputFo
 npm install          # first time only
 npm run build        # bundles JS, copies HTML/favicon to cmd/media-sorter/static/
 source .env.local    # loads GDRIVE_CLIENT_ID and GDRIVE_CLIENT_SECRET
-go build -ldflags "-X video-sorter/internal/storage/gdrive.embeddedClientID=$GDRIVE_CLIENT_ID -X video-sorter/internal/storage/gdrive.embeddedClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter.exe ./cmd/media-sorter && ./media-sorter.exe
+go build -ldflags "-X media-sorter/internal/storage/gdrive.embeddedClientID=$GDRIVE_CLIENT_ID -X media-sorter/internal/storage/gdrive.embeddedClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter.exe ./cmd/media-sorter && ./media-sorter.exe
 
 # Dev: build frontend + Go binary (Mac/Linux)
 npm install && npm run build
 source .env.local
-go build -ldflags "-X video-sorter/internal/storage/gdrive.embeddedClientID=$GDRIVE_CLIENT_ID -X video-sorter/internal/storage/gdrive.embeddedClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter ./cmd/media-sorter && ./media-sorter
+go build -ldflags "-X media-sorter/internal/storage/gdrive.embeddedClientID=$GDRIVE_CLIENT_ID -X media-sorter/internal/storage/gdrive.embeddedClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter ./cmd/media-sorter && ./media-sorter
 
 # Cross-platform release builds
 bash build.sh        # from Mac/Linux
 build.bat            # from Windows
 ```
 
-**Important on Windows:** Kill existing processes before rebuilding:
+**Quick rebuild & run (Windows):** Kill existing process, rebuild, and start:
 ```bash
-taskkill //F //IM media-sorter.exe 2>/dev/null; source .env.local && npm run build && go build -ldflags "-X video-sorter/internal/storage/gdrive.embeddedClientID=$GDRIVE_CLIENT_ID -X video-sorter/internal/storage/gdrive.embeddedClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter.exe ./cmd/media-sorter
+taskkill //F //IM media-sorter.exe 2>/dev/null; source .env.local && npm run build && go build -ldflags "-X media-sorter/internal/storage/gdrive.embeddedClientID=$GDRIVE_CLIENT_ID -X media-sorter/internal/storage/gdrive.embeddedClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter.exe ./cmd/media-sorter && ./media-sorter.exe
+```
+
+**Quick rebuild & run (Mac/Linux):** Kill existing process, rebuild, and start:
+```bash
+pkill -f media-sorter 2>/dev/null; source .env.local && npm run build && go build -ldflags "-X media-sorter/internal/storage/gdrive.embeddedClientID=$GDRIVE_CLIENT_ID -X media-sorter/internal/storage/gdrive.embeddedClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter ./cmd/media-sorter && ./media-sorter
 ```
 
 **Google Drive credentials:** `.env.local` (gitignored) holds `GDRIVE_CLIENT_ID` and `GDRIVE_CLIENT_SECRET` for local builds. CI uses GitHub repository secrets.

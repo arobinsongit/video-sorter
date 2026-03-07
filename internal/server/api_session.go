@@ -13,19 +13,6 @@ func (s *Server) registerSessionAPI(mux *http.ServeMux) {
 	if home, err := os.UserHomeDir(); err == nil {
 		sessionPath = filepath.Join(home, ".media-sorter-session.json")
 		userSettingsPath = filepath.Join(home, ".media-sorter-settings.json")
-		// Migrate legacy filenames
-		legacySession := filepath.Join(home, ".video-sorter-session.json")
-		legacySettings := filepath.Join(home, ".video-sorter-settings.json")
-		if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
-			if _, err := os.Stat(legacySession); err == nil {
-				os.Rename(legacySession, sessionPath)
-			}
-		}
-		if _, err := os.Stat(userSettingsPath); os.IsNotExist(err) {
-			if _, err := os.Stat(legacySettings); err == nil {
-				os.Rename(legacySettings, userSettingsPath)
-			}
-		}
 	}
 
 	mux.HandleFunc("/api/session", func(w http.ResponseWriter, r *http.Request) {

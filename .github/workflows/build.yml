@@ -32,7 +32,7 @@ jobs:
           GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
         run: |
           mkdir -p dist
-          LDFLAGS="-s -w -X video-sorter/internal/storage/gdrive.embeddedClientID=${GDRIVE_CLIENT_ID} -X video-sorter/internal/storage/gdrive.embeddedClientSecret=${GDRIVE_CLIENT_SECRET}"
+          LDFLAGS="-s -w -X media-sorter/internal/storage/gdrive.embeddedClientID=${GDRIVE_CLIENT_ID} -X media-sorter/internal/storage/gdrive.embeddedClientSecret=${GDRIVE_CLIENT_SECRET}"
           GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/media-sorter-windows.exe ./cmd/media-sorter
           GOOS=darwin GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/media-sorter-mac-intel ./cmd/media-sorter
           GOOS=darwin GOARCH=arm64 go build -ldflags="${LDFLAGS}" -o dist/media-sorter-mac-arm ./cmd/media-sorter

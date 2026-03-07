@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"video-sorter/internal/storage"
+	"media-sorter/internal/storage"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"

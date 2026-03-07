@@ -1,4 +1,4 @@
-module video-sorter
+module media-sorter
 
 go 1.25.0
 

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"video-sorter/internal/storage"
+	"media-sorter/internal/storage"
 )
 
 // Storage implements storage.Provider for Dropbox.

@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"strings"
 
-	"video-sorter/internal/storage"
+	"media-sorter/internal/storage"
 )
 
 func (s *Server) registerCoreAPI(mux *http.ServeMux) {

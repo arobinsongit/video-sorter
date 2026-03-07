@@ -11,7 +11,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"video-sorter/internal/storage"
+	"media-sorter/internal/storage"
 )
 
 func newTestServer() *Server {

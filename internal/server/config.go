@@ -3,9 +3,8 @@ package server
 import (
 	"encoding/json"
 	"path/filepath"
-	"strings"
 
-	"video-sorter/internal/storage"
+	"media-sorter/internal/storage"
 )
 
 // GroupDef defines a metadata group (e.g. Subject, Tags, Quality)
@@ -83,31 +82,6 @@ func loadConfig(store storage.Provider, dir string) (ProjectConfig, error) {
 		}
 	}
 
-	if store.IsLocal() {
-		legacyJsonPath := filepath.Join(dir, "video-sorter-config.json")
-		if data, err := store.ReadFile(legacyJsonPath); err == nil {
-			var cfg ProjectConfig
-			if err := json.Unmarshal(data, &cfg); err == nil {
-				saveConfig(store, dir, cfg)
-				return cfg, nil
-			}
-		}
-
-		txtPath := filepath.Join(dir, "video-sorter-config.txt")
-		if data, err := store.ReadFile(txtPath); err == nil {
-			subjects, tags := parseConfigText(string(data))
-			cfg := defaultConfig()
-			if len(subjects) > 0 {
-				cfg.Groups[0].Options = subjects
-			}
-			if len(tags) > 0 {
-				cfg.Groups[1].Options = tags
-			}
-			saveConfig(store, dir, cfg)
-			return cfg, nil
-		}
-	}
-
 	cfg := defaultConfig()
 	saveConfig(store, dir, cfg)
 	return cfg, nil
@@ -121,31 +95,3 @@ func saveConfig(store storage.Provider, dir string, cfg ProjectConfig) error {
 	return store.WriteFile(filepath.Join(dir, configFileName), data)
 }
 
-func parseConfigText(text string) (subjects []string, tags []string) {
-	section := ""
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		lower := strings.ToLower(line)
-		if strings.HasPrefix(lower, "# subjects") || strings.HasPrefix(lower, "# players") {
-			section = "subjects"
-			continue
-		}
-		if strings.HasPrefix(lower, "# tags") {
-			section = "tags"
-			continue
-		}
-		if strings.HasPrefix(line, "#") {
-			continue
-		}
-		switch section {
-		case "subjects":
-			subjects = append(subjects, line)
-		case "tags":
-			tags = append(tags, line)
-		}
-	}
-	return
-}
