@@ -7,19 +7,11 @@ import (
 	"strings"
 
 	"media-sorter/internal/storage"
-	"media-sorter/internal/storage/dropbox"
-	"media-sorter/internal/storage/gdrive"
-	"media-sorter/internal/storage/onedrive"
-	s3store "media-sorter/internal/storage/s3"
 )
 
 // Server holds the HTTP server state including cloud provider connections.
 type Server struct {
-	GDrive   *gdrive.Storage
-	S3       *s3store.Storage
-	Dropbox  *dropbox.Storage
-	OneDrive *onedrive.Storage
-
+	clouds        []CloudProvider
 	oauthState    string
 	oauthProvider string
 	Port          int
@@ -27,22 +19,14 @@ type Server struct {
 
 // New creates a new Server, restoring any saved cloud provider connections.
 func New() *Server {
-	s := &Server{}
-
-	if gd, err := gdrive.New(); err == nil {
-		s.GDrive = gd
+	return &Server{
+		clouds: []CloudProvider{
+			newGDriveProvider(),
+			newS3Provider(),
+			newDropboxProvider(),
+			newOneDriveProvider(),
+		},
 	}
-	if s3s, err := s3store.New(); err == nil {
-		s.S3 = s3s
-	}
-	if db, err := dropbox.New(); err == nil {
-		s.Dropbox = db
-	}
-	if od, err := onedrive.New(); err == nil {
-		s.OneDrive = od
-	}
-
-	return s
 }
 
 // Handler returns the HTTP handler with all routes registered.
@@ -66,25 +50,24 @@ func (s *Server) Handler(staticFS fs.FS) http.Handler {
 
 // getProvider returns the appropriate storage provider for a path.
 func (s *Server) getProvider(path string) storage.Provider {
-	switch {
-	case strings.HasPrefix(path, "gdrive://"):
-		if s.GDrive != nil {
-			return s.GDrive
-		}
-	case strings.HasPrefix(path, "s3://"):
-		if s.S3 != nil {
-			return s.S3
-		}
-	case strings.HasPrefix(path, "dropbox://"):
-		if s.Dropbox != nil {
-			return s.Dropbox
-		}
-	case strings.HasPrefix(path, "onedrive://"):
-		if s.OneDrive != nil {
-			return s.OneDrive
+	for _, c := range s.clouds {
+		if strings.HasPrefix(path, c.PathPrefix()) {
+			if sp := c.StorageProvider(); sp != nil {
+				return sp
+			}
 		}
 	}
 	return &storage.LocalStorage{}
+}
+
+// cloudByID returns the cloud provider with the given ID, or nil.
+func (s *Server) cloudByID(id string) CloudProvider {
+	for _, c := range s.clouds {
+		if c.ID() == id {
+			return c
+		}
+	}
+	return nil
 }
 
 func jsonOK(w http.ResponseWriter, data any) {

@@ -15,7 +15,15 @@ import (
 )
 
 func newTestServer() *Server {
-	return &Server{Port: 9999}
+	return &Server{
+		clouds: []CloudProvider{
+			&mockCloudProvider{id: "gdrive", name: "Google Drive", prefix: "gdrive://"},
+			&mockCloudProvider{id: "s3", name: "Amazon S3", prefix: "s3://"},
+			&mockCloudProvider{id: "dropbox", name: "Dropbox", prefix: "dropbox://"},
+			&mockCloudProvider{id: "onedrive", name: "OneDrive", prefix: "onedrive://"},
+		},
+		Port: 9999,
+	}
 }
 
 func newTestHandler() http.Handler {
@@ -414,76 +422,6 @@ func TestAPIUserSettingsRoundtrip(t *testing.T) {
 
 	if w.Code != 200 {
 		t.Fatalf("POST /api/user-settings status = %d, body: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestAPICloudProviders(t *testing.T) {
-	handler := newTestHandler()
-	req := httptest.NewRequest("GET", "/api/cloud/providers", nil)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != 200 {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-
-	var providers []struct {
-		ID        string `json:"id"`
-		Name      string `json:"name"`
-		Connected bool   `json:"connected"`
-	}
-	json.Unmarshal(w.Body.Bytes(), &providers)
-
-	if len(providers) != 4 {
-		t.Fatalf("providers count = %d, want 4", len(providers))
-	}
-
-	ids := map[string]bool{}
-	for _, p := range providers {
-		ids[p.ID] = true
-		if p.Connected {
-			t.Errorf("provider %q should not be connected in test", p.ID)
-		}
-	}
-	for _, id := range []string{"gdrive", "s3", "dropbox", "onedrive"} {
-		if !ids[id] {
-			t.Errorf("missing provider %q", id)
-		}
-	}
-}
-
-func TestAPICloudDisconnectUnknown(t *testing.T) {
-	handler := newTestHandler()
-	body := `{"provider":"unknown"}`
-	req := httptest.NewRequest("POST", "/api/cloud/disconnect", strings.NewReader(body))
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, req)
-
-	if w.Code != 400 {
-		t.Errorf("status = %d, want 400", w.Code)
-	}
-}
-
-func TestGetProviderRouting(t *testing.T) {
-	s := newTestServer()
-
-	tests := []struct {
-		path    string
-		isLocal bool
-	}{
-		{"/local/path", true},
-		{"C:\\Windows\\Path", true},
-		{"gdrive://folder", true},   // nil provider falls back to local
-		{"s3://bucket", true},       // nil provider falls back to local
-		{"dropbox://path", true},    // nil provider falls back to local
-		{"onedrive://path", true},   // nil provider falls back to local
-	}
-
-	for _, tt := range tests {
-		provider := s.getProvider(tt.path)
-		if provider.IsLocal() != tt.isLocal {
-			t.Errorf("getProvider(%q).IsLocal() = %v, want %v", tt.path, provider.IsLocal(), tt.isLocal)
-		}
 	}
 }
 
