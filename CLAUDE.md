@@ -113,10 +113,12 @@ Output modes: `rename` (in place), `move` (to outputFolder), `copy` (to outputFo
 # Dev: build frontend + Go binary (Windows)
 npm install          # first time only
 npm run build        # bundles JS, copies HTML/favicon to static/
+source .env.local    # loads GDRIVE_CLIENT_ID and GDRIVE_CLIENT_SECRET
 go build -ldflags "-X main.embeddedGDriveClientID=$GDRIVE_CLIENT_ID -X main.embeddedGDriveClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter.exe . && ./media-sorter.exe
 
 # Dev: build frontend + Go binary (Mac/Linux)
 npm install && npm run build
+source .env.local
 go build -ldflags "-X main.embeddedGDriveClientID=$GDRIVE_CLIENT_ID -X main.embeddedGDriveClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter . && ./media-sorter
 
 # Cross-platform release builds
@@ -126,8 +128,10 @@ build.bat            # from Windows
 
 **Important on Windows:** Kill existing processes before rebuilding:
 ```bash
-taskkill //F //IM media-sorter.exe 2>/dev/null; npm run build && go build -o media-sorter.exe .
+taskkill //F //IM media-sorter.exe 2>/dev/null; source .env.local && npm run build && go build -ldflags "-X main.embeddedGDriveClientID=$GDRIVE_CLIENT_ID -X main.embeddedGDriveClientSecret=$GDRIVE_CLIENT_SECRET" -o media-sorter.exe .
 ```
+
+**Google Drive credentials:** `.env.local` (gitignored) holds `GDRIVE_CLIENT_ID` and `GDRIVE_CLIENT_SECRET` for local builds. CI uses GitHub repository secrets.
 
 ## Filename Encoding Format
 
