@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/option"
 )
@@ -142,9 +143,18 @@ var staticFS embed.FS
 func main() {
 	mux := http.NewServeMux()
 
-	// Try to restore Google Drive connection
+	// Try to restore cloud provider connections from saved tokens/credentials
 	if gd, err := newGoogleDriveStorage(); err == nil {
 		gdrive = gd
+	}
+	if s3s, err := newS3Storage(); err == nil {
+		s3store = s3s
+	}
+	if db, err := newDropboxStorage(); err == nil {
+		dropbox = db
+	}
+	if od, err := newOneDriveStorage(); err == nil {
+		onedrive = od
 	}
 
 	// Serve embedded frontend
@@ -256,7 +266,13 @@ func main() {
 			}
 		}
 
-		oldPath := filepath.Join(req.Dir, req.OldName)
+		// Use cloud-safe path joining for non-local providers
+		joinPath := filepath.Join
+		if !store.IsLocal() {
+			joinPath = cloudJoin
+		}
+
+		oldPath := joinPath(req.Dir, req.OldName)
 		if !store.FileExists(oldPath) {
 			jsonError(w, "file not found: "+req.OldName, 404)
 			return
@@ -269,7 +285,7 @@ func main() {
 
 		var newPath string
 		if mode == "rename" || req.OutputFolder == "" {
-			newPath = filepath.Join(req.Dir, req.NewName)
+			newPath = joinPath(req.Dir, req.NewName)
 		} else {
 			destDir := req.OutputFolder
 			if store.IsLocal() && !filepath.IsAbs(destDir) {
@@ -279,7 +295,7 @@ func main() {
 				jsonError(w, "failed to create output folder: "+err.Error(), 500)
 				return
 			}
-			newPath = filepath.Join(destDir, req.NewName)
+			newPath = joinPath(destDir, req.NewName)
 		}
 
 		if store.FileExists(newPath) {
@@ -347,18 +363,113 @@ func main() {
 			HasCreds  bool   `json:"hasCreds"`
 		}
 
-		_, credsErr := os.Stat(gdriveClientCredsPath())
+		// Google Drive has creds if embedded OR file exists
+		gdriveHasCreds := (embeddedGDriveClientID != "" && embeddedGDriveClientSecret != "")
+		if !gdriveHasCreds {
+			_, err := os.Stat(gdriveClientCredsPath())
+			gdriveHasCreds = err == nil
+		}
+		_, s3CredsErr := os.Stat(s3CredsPath())
+		_, dropboxCredsErr := os.Stat(dropboxCredsPath())
+		_, onedriveCredsErr := os.Stat(onedriveCredsPath())
 		providers := []ProviderStatus{
-			{ID: "gdrive", Name: "Google Drive", Connected: gdrive != nil, HasCreds: credsErr == nil},
-			{ID: "s3", Name: "Amazon S3", Connected: false, HasCreds: false},
-			{ID: "dropbox", Name: "Dropbox", Connected: false, HasCreds: false},
-			{ID: "onedrive", Name: "OneDrive", Connected: false, HasCreds: false},
+			{ID: "gdrive", Name: "Google Drive", Connected: gdrive != nil, HasCreds: gdriveHasCreds},
+			{ID: "s3", Name: "Amazon S3", Connected: s3store != nil, HasCreds: s3CredsErr == nil},
+			{ID: "dropbox", Name: "Dropbox", Connected: dropbox != nil, HasCreds: dropboxCredsErr == nil},
+			{ID: "onedrive", Name: "OneDrive", Connected: onedrive != nil, HasCreds: onedriveCredsErr == nil},
 		}
 		jsonOK(w, providers)
 	})
 
-	// Store for OAuth state parameter
+	// Save cloud provider credentials from the UI
+	mux.HandleFunc("/api/cloud/credentials", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			jsonError(w, "POST required", 405)
+			return
+		}
+
+		var req struct {
+			Provider string          `json:"provider"`
+			Creds    json.RawMessage `json:"credentials"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonError(w, err.Error(), 400)
+			return
+		}
+
+		switch req.Provider {
+		case "gdrive":
+			// For Google Drive, the credentials are the full OAuth client JSON
+			// Validate it's parseable
+			if _, err := google.ConfigFromJSON(req.Creds, drive.DriveScope); err != nil {
+				jsonError(w, "Invalid Google OAuth credentials JSON: "+err.Error(), 400)
+				return
+			}
+			if err := os.WriteFile(gdriveClientCredsPath(), req.Creds, 0600); err != nil {
+				jsonError(w, "Failed to save credentials: "+err.Error(), 500)
+				return
+			}
+			jsonOK(w, "ok")
+
+		case "s3":
+			var creds S3Credentials
+			if err := json.Unmarshal(req.Creds, &creds); err != nil {
+				jsonError(w, "Invalid S3 credentials: "+err.Error(), 400)
+				return
+			}
+			if creds.AccessKeyID == "" || creds.SecretAccessKey == "" || creds.Region == "" {
+				jsonError(w, "accessKeyId, secretAccessKey, and region are required", 400)
+				return
+			}
+			data, _ := json.MarshalIndent(creds, "", "  ")
+			if err := os.WriteFile(s3CredsPath(), data, 0600); err != nil {
+				jsonError(w, "Failed to save credentials: "+err.Error(), 500)
+				return
+			}
+			jsonOK(w, "ok")
+
+		case "dropbox":
+			var creds DropboxCredentials
+			if err := json.Unmarshal(req.Creds, &creds); err != nil {
+				jsonError(w, "Invalid Dropbox credentials: "+err.Error(), 400)
+				return
+			}
+			if creds.ClientID == "" || creds.ClientSecret == "" {
+				jsonError(w, "clientId and clientSecret are required", 400)
+				return
+			}
+			data, _ := json.MarshalIndent(creds, "", "  ")
+			if err := os.WriteFile(dropboxCredsPath(), data, 0600); err != nil {
+				jsonError(w, "Failed to save credentials: "+err.Error(), 500)
+				return
+			}
+			jsonOK(w, "ok")
+
+		case "onedrive":
+			var creds OneDriveCredentials
+			if err := json.Unmarshal(req.Creds, &creds); err != nil {
+				jsonError(w, "Invalid OneDrive credentials: "+err.Error(), 400)
+				return
+			}
+			if creds.ClientID == "" || creds.ClientSecret == "" {
+				jsonError(w, "clientId and clientSecret are required", 400)
+				return
+			}
+			data, _ := json.MarshalIndent(creds, "", "  ")
+			if err := os.WriteFile(onedriveCredsPath(), data, 0600); err != nil {
+				jsonError(w, "Failed to save credentials: "+err.Error(), 500)
+				return
+			}
+			jsonOK(w, "ok")
+
+		default:
+			jsonError(w, "unknown provider: "+req.Provider, 400)
+		}
+	})
+
+	// Store for OAuth state parameter and which provider initiated it
 	var oauthState string
+	var oauthProvider string
 
 	// Initiate OAuth flow or save credentials
 	mux.HandleFunc("/api/cloud/connect", func(w http.ResponseWriter, r *http.Request) {
@@ -375,20 +486,50 @@ func main() {
 			return
 		}
 
+		callbackURL := fmt.Sprintf("http://127.0.0.1:%d/api/cloud/callback", serverPort)
+		oauthState = fmt.Sprintf("media-sorter-%d", time.Now().UnixNano())
+
 		switch req.Provider {
 		case "gdrive":
-			config, err := gdriveOAuthConfig(gdriveClientCredsPath())
+			config, err := gdriveOAuthConfig()
 			if err != nil {
-				jsonError(w, "Google Drive credentials not configured. Place your OAuth client credentials JSON file at: "+gdriveClientCredsPath(), 400)
+				jsonError(w, err.Error(), 400)
 				return
 			}
-			// Find the server's port for the callback URL
-			oauthState = fmt.Sprintf("media-sorter-%d", time.Now().UnixNano())
-			config.RedirectURL = fmt.Sprintf("http://127.0.0.1:%d/api/cloud/callback", serverPort)
+			oauthProvider = "gdrive"
+			config.RedirectURL = callbackURL
 			authURL := config.AuthCodeURL(oauthState, oauth2.AccessTypeOffline, oauth2.ApprovalForce)
 			jsonOK(w, map[string]string{"authURL": authURL})
+		case "s3":
+			// S3 uses access key credentials, not OAuth.
+			// The connect call for S3 attempts to create a client from saved credentials.
+			store, err := newS3Storage()
+			if err != nil {
+				jsonError(w, "S3 credentials not configured. Place your credentials JSON file at: "+s3CredsPath(), 400)
+				return
+			}
+			s3store = store
+			jsonOK(w, map[string]string{"status": "connected"})
+		case "dropbox":
+			creds, err := loadDropboxCreds()
+			if err != nil {
+				jsonError(w, "Dropbox credentials not configured. Place your credentials JSON file at: "+dropboxCredsPath(), 400)
+				return
+			}
+			oauthProvider = "dropbox"
+			authURL := dropboxAuthURL(creds.ClientID, callbackURL, oauthState)
+			jsonOK(w, map[string]string{"authURL": authURL})
+		case "onedrive":
+			creds, err := loadOneDriveCreds()
+			if err != nil {
+				jsonError(w, "OneDrive credentials not configured. Place your credentials JSON file at: "+onedriveCredsPath(), 400)
+				return
+			}
+			oauthProvider = "onedrive"
+			authURL := onedriveAuthURL(creds.ClientID, callbackURL, oauthState)
+			jsonOK(w, map[string]string{"authURL": authURL})
 		default:
-			jsonError(w, "provider not yet supported: "+req.Provider, 400)
+			jsonError(w, "unknown provider: "+req.Provider, 400)
 		}
 	})
 
@@ -405,42 +546,87 @@ func main() {
 			return
 		}
 
-		config, err := gdriveOAuthConfig(gdriveClientCredsPath())
-		if err != nil {
-			http.Error(w, "Failed to load credentials", http.StatusInternalServerError)
+		callbackURL := fmt.Sprintf("http://127.0.0.1:%d/api/cloud/callback", serverPort)
+		providerName := ""
+
+		switch oauthProvider {
+		case "gdrive":
+			providerName = "Google Drive"
+			config, err := gdriveOAuthConfig()
+			if err != nil {
+				http.Error(w, "Failed to load credentials", http.StatusInternalServerError)
+				return
+			}
+			config.RedirectURL = callbackURL
+
+			token, err := config.Exchange(context.Background(), code)
+			if err != nil {
+				http.Error(w, "Failed to exchange token: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if err := saveGdriveToken(token); err != nil {
+				http.Error(w, "Failed to save token: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			client := config.Client(context.Background(), token)
+			srv, err := drive.NewService(context.Background(), option.WithHTTPClient(client))
+			if err != nil {
+				http.Error(w, "Failed to create Drive service: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			gdrive = &GoogleDriveStorage{service: srv, token: token}
+
+		case "dropbox":
+			providerName = "Dropbox"
+			creds, err := loadDropboxCreds()
+			if err != nil {
+				http.Error(w, "Failed to load credentials", http.StatusInternalServerError)
+				return
+			}
+			token, err := exchangeDropboxCode(creds.ClientID, creds.ClientSecret, code, callbackURL)
+			if err != nil {
+				http.Error(w, "Failed to exchange token: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if err := saveDropboxToken(token); err != nil {
+				http.Error(w, "Failed to save token: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			dropbox = &DropboxStorage{accessToken: token.AccessToken}
+
+		case "onedrive":
+			providerName = "OneDrive"
+			creds, err := loadOneDriveCreds()
+			if err != nil {
+				http.Error(w, "Failed to load credentials", http.StatusInternalServerError)
+				return
+			}
+			token, err := exchangeOneDriveCode(creds.ClientID, creds.ClientSecret, code, callbackURL)
+			if err != nil {
+				http.Error(w, "Failed to exchange token: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if err := saveOneDriveToken(token); err != nil {
+				http.Error(w, "Failed to save token: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			onedrive = &OneDriveStorage{accessToken: token.AccessToken}
+
+		default:
+			http.Error(w, "Unknown OAuth provider", http.StatusBadRequest)
 			return
 		}
-		config.RedirectURL = fmt.Sprintf("http://127.0.0.1:%d/api/cloud/callback", serverPort)
 
-		token, err := config.Exchange(context.Background(), code)
-		if err != nil {
-			http.Error(w, "Failed to exchange token: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		if err := saveGdriveToken(token); err != nil {
-			http.Error(w, "Failed to save token: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// Create the Drive service
-		client := config.Client(context.Background(), token)
-		srv, err := drive.NewService(context.Background(), option.WithHTTPClient(client))
-		if err != nil {
-			http.Error(w, "Failed to create Drive service: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		gdrive = &GoogleDriveStorage{service: srv, token: token}
 		oauthState = ""
+		oauthProvider = ""
 
-		// Show success page that closes itself
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(`<!DOCTYPE html><html><body>
-			<h2>Google Drive connected successfully!</h2>
+		w.Write([]byte(fmt.Sprintf(`<!DOCTYPE html><html><body>
+			<h2>%s connected successfully!</h2>
 			<p>You can close this tab and return to Media Sorter.</p>
 			<script>setTimeout(function(){window.close()},2000)</script>
-		</body></html>`))
+		</body></html>`, providerName)))
 	})
 
 	// Disconnect a cloud provider
@@ -462,6 +648,17 @@ func main() {
 		case "gdrive":
 			gdrive = nil
 			os.Remove(gdriveTokenPath())
+			jsonOK(w, "ok")
+		case "s3":
+			s3store = nil
+			jsonOK(w, "ok")
+		case "dropbox":
+			dropbox = nil
+			os.Remove(dropboxTokenPath())
+			jsonOK(w, "ok")
+		case "onedrive":
+			onedrive = nil
+			os.Remove(onedriveTokenPath())
 			jsonOK(w, "ok")
 		default:
 			jsonError(w, "unknown provider: "+req.Provider, 400)
@@ -515,6 +712,106 @@ func main() {
 					ID:   f.Id,
 					Path: entryPath,
 				})
+			}
+			jsonOK(w, folders)
+
+		case "s3":
+			if s3store == nil {
+				jsonError(w, "S3 not connected", 400)
+				return
+			}
+			type FolderEntry struct {
+				Name string `json:"name"`
+				Path string `json:"path"`
+			}
+			if path == "" {
+				// List buckets
+				buckets, err := s3store.listBuckets()
+				if err != nil {
+					jsonError(w, err.Error(), 500)
+					return
+				}
+				var folders []FolderEntry
+				for _, b := range buckets {
+					folders = append(folders, FolderEntry{Name: b, Path: b})
+				}
+				jsonOK(w, folders)
+			} else {
+				// List folders within a bucket/prefix
+				parts := strings.SplitN(path, "/", 2)
+				bucket := parts[0]
+				prefix := ""
+				if len(parts) > 1 {
+					prefix = parts[1]
+				}
+				subfolders, err := s3store.listFolders(bucket, prefix)
+				if err != nil {
+					jsonError(w, err.Error(), 500)
+					return
+				}
+				var folders []FolderEntry
+				for _, f := range subfolders {
+					folderPath := bucket + "/"
+					if prefix != "" {
+						folderPath += prefix + "/"
+					}
+					folderPath += f
+					folders = append(folders, FolderEntry{Name: f, Path: folderPath})
+				}
+				jsonOK(w, folders)
+			}
+
+		case "dropbox":
+			if dropbox == nil {
+				jsonError(w, "Dropbox not connected", 400)
+				return
+			}
+			type FolderEntry struct {
+				Name string `json:"name"`
+				Path string `json:"path"`
+			}
+			dbxPath := ""
+			if path != "" && path != "/" {
+				dbxPath = path
+				if !strings.HasPrefix(dbxPath, "/") {
+					dbxPath = "/" + dbxPath
+				}
+			}
+			entries, err := dropbox.listFolders(dbxPath)
+			if err != nil {
+				jsonError(w, err.Error(), 500)
+				return
+			}
+			var folders []FolderEntry
+			for _, e := range entries {
+				folders = append(folders, FolderEntry{Name: e.Name, Path: e.Path})
+			}
+			jsonOK(w, folders)
+
+		case "onedrive":
+			if onedrive == nil {
+				jsonError(w, "OneDrive not connected", 400)
+				return
+			}
+			type FolderEntry struct {
+				Name string `json:"name"`
+				Path string `json:"path"`
+			}
+			odPath := ""
+			if path != "" && path != "/" {
+				odPath = path
+				if !strings.HasPrefix(odPath, "/") {
+					odPath = "/" + odPath
+				}
+			}
+			entries, err := onedrive.listFolders(odPath)
+			if err != nil {
+				jsonError(w, err.Error(), 500)
+				return
+			}
+			var folders []FolderEntry
+			for _, e := range entries {
+				folders = append(folders, FolderEntry{Name: e.Name, Path: e.Path})
 			}
 			jsonOK(w, folders)
 

@@ -4,10 +4,42 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 )
+
+// splitScheme splits "scheme://rest" into ("scheme://", "rest").
+// If no scheme, returns ("", p).
+func splitScheme(p string) (scheme, rest string) {
+	if idx := strings.Index(p, "://"); idx >= 0 {
+		return p[:idx+3], p[idx+3:]
+	}
+	return "", p
+}
+
+// cloudJoin joins cloud path segments using forward slashes, preserving the URL scheme.
+func cloudJoin(parts ...string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	scheme, first := splitScheme(parts[0])
+	parts[0] = first
+	return scheme + path.Join(parts...)
+}
+
+// cloudDir returns the directory portion of a cloud path, preserving the URL scheme.
+func cloudDir(p string) string {
+	scheme, rest := splitScheme(p)
+	return scheme + path.Dir(rest)
+}
+
+// cloudBase returns the filename portion of a cloud path.
+func cloudBase(p string) string {
+	_, rest := splitScheme(p)
+	return path.Base(rest)
+}
 
 // FileInfo represents a media file in any storage backend.
 type FileInfo struct {
@@ -169,15 +201,27 @@ func getStorageProvider(path string) StorageProvider {
 		}
 		return &LocalStorage{}
 	case strings.HasPrefix(path, "s3://"):
-		return &LocalStorage{} // TODO: S3 provider
+		if s3store != nil {
+			return s3store
+		}
+		return &LocalStorage{}
 	case strings.HasPrefix(path, "dropbox://"):
-		return &LocalStorage{} // TODO: Dropbox provider
+		if dropbox != nil {
+			return dropbox
+		}
+		return &LocalStorage{}
 	case strings.HasPrefix(path, "onedrive://"):
-		return &LocalStorage{} // TODO: OneDrive provider
+		if onedrive != nil {
+			return onedrive
+		}
+		return &LocalStorage{}
 	default:
 		return &LocalStorage{}
 	}
 }
 
-// gdrive is the global Google Drive storage provider (nil if not connected).
+// Global cloud storage providers (nil if not connected).
 var gdrive *GoogleDriveStorage
+var s3store *S3Storage
+var dropbox *DropboxStorage
+var onedrive *OneDriveStorage

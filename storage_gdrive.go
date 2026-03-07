@@ -24,20 +24,31 @@ type GoogleDriveStorage struct {
 }
 
 // gdriveOAuthConfig returns the OAuth2 config for Google Drive.
-// Client ID/secret are loaded from the credentials file.
-func gdriveOAuthConfig(credsPath string) (*oauth2.Config, error) {
-	data, err := os.ReadFile(credsPath)
-	if err != nil {
-		return nil, fmt.Errorf("unable to read client credentials: %w", err)
+// Uses embedded client credentials by default. If a credentials JSON file
+// exists at ~/.media-sorter/gdrive-credentials.json, it overrides the defaults.
+func gdriveOAuthConfig() (*oauth2.Config, error) {
+	// Check for override credentials file first
+	credsPath := gdriveClientCredsPath()
+	if data, err := os.ReadFile(credsPath); err == nil {
+		config, err := google.ConfigFromJSON(data,
+			drive.DriveScope,
+		)
+		if err == nil {
+			return config, nil
+		}
 	}
-	config, err := google.ConfigFromJSON(data,
-		drive.DriveReadonlyScope,
-		drive.DriveFileScope,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse client credentials: %w", err)
+
+	// Use embedded credentials
+	if embeddedGDriveClientID == "" || embeddedGDriveClientSecret == "" {
+		return nil, fmt.Errorf("Google Drive not configured: set embedded credentials in gdrive_client.go and rebuild, or place credentials JSON at %s", credsPath)
 	}
-	return config, nil
+
+	return &oauth2.Config{
+		ClientID:     embeddedGDriveClientID,
+		ClientSecret: embeddedGDriveClientSecret,
+		Scopes:       []string{drive.DriveScope},
+		Endpoint:     google.Endpoint,
+	}, nil
 }
 
 // credentialsDir returns the directory for storing credentials.
@@ -63,7 +74,7 @@ func gdriveClientCredsPath() string {
 
 // newGoogleDriveStorage creates a Google Drive storage provider from a saved token.
 func newGoogleDriveStorage() (*GoogleDriveStorage, error) {
-	config, err := gdriveOAuthConfig(gdriveClientCredsPath())
+	config, err := gdriveOAuthConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -204,9 +215,9 @@ func (g *GoogleDriveStorage) ServeFile(w http.ResponseWriter, r *http.Request, d
 	io.Copy(w, resp.Body)
 }
 
-func (g *GoogleDriveStorage) ReadFile(path string) ([]byte, error) {
-	dir := filepath.Dir(path)
-	name := filepath.Base(path)
+func (g *GoogleDriveStorage) ReadFile(p string) ([]byte, error) {
+	dir := cloudDir(p)
+	name := cloudBase(p)
 	drivePath := parseDrivePath(dir)
 
 	folderID, err := g.resolveFolder(drivePath)
@@ -232,9 +243,9 @@ func (g *GoogleDriveStorage) ReadFile(path string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func (g *GoogleDriveStorage) WriteFile(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	name := filepath.Base(path)
+func (g *GoogleDriveStorage) WriteFile(p string, data []byte) error {
+	dir := cloudDir(p)
+	name := cloudBase(p)
 	drivePath := parseDrivePath(dir)
 
 	folderID, err := g.resolveFolder(drivePath)
@@ -287,16 +298,16 @@ func (g *GoogleDriveStorage) Rename(dir, oldName, newName string) error {
 func (g *GoogleDriveStorage) MoveFile(oldPath, newPath string) error {
 	// For Google Drive, move is rename + parent change
 	// Simplified: only support rename within same folder for now
-	dir := filepath.Dir(oldPath)
-	oldName := filepath.Base(oldPath)
-	newName := filepath.Base(newPath)
+	dir := cloudDir(oldPath)
+	oldName := cloudBase(oldPath)
+	newName := cloudBase(newPath)
 	return g.Rename(dir, oldName, newName)
 }
 
 func (g *GoogleDriveStorage) CopyFile(oldPath, newPath string) error {
-	dir := filepath.Dir(oldPath)
-	oldName := filepath.Base(oldPath)
-	newName := filepath.Base(newPath)
+	dir := cloudDir(oldPath)
+	oldName := cloudBase(oldPath)
+	newName := cloudBase(newPath)
 	drivePath := parseDrivePath(dir)
 
 	folderID, err := g.resolveFolder(drivePath)
@@ -321,9 +332,9 @@ func (g *GoogleDriveStorage) CopyFile(oldPath, newPath string) error {
 	return err
 }
 
-func (g *GoogleDriveStorage) FileExists(path string) bool {
-	dir := filepath.Dir(path)
-	name := filepath.Base(path)
+func (g *GoogleDriveStorage) FileExists(p string) bool {
+	dir := cloudDir(p)
+	name := cloudBase(p)
 	drivePath := parseDrivePath(dir)
 
 	folderID, err := g.resolveFolder(drivePath)
