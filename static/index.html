@@ -41,6 +41,10 @@
   <div class="h-6 w-px bg-neutral-300 dark:bg-neutral-700"></div>
   <span id="fileCounter" class="text-xs font-medium text-neutral-500 whitespace-nowrap"></span>
   <div class="h-6 w-px bg-neutral-300 dark:bg-neutral-700"></div>
+  <button id="btnCloud" title="Cloud storage"
+    class="h-10 w-10 flex items-center justify-center rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors text-lg">
+    &#9729;
+  </button>
   <button id="btnSettings" title="Project settings"
     class="h-10 w-10 flex items-center justify-center rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors text-lg">
     &#9881;
@@ -149,6 +153,17 @@
       <button id="configEditorClose" class="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 text-lg leading-none cursor-pointer">&times;</button>
     </div>
     <div id="configEditorContent" class="p-6"></div>
+  </div>
+</div>
+
+<!-- Cloud storage modal -->
+<div id="cloudModal" class="fixed inset-0 bg-black/50 dark:bg-black/70 z-40 items-center justify-center hidden">
+  <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-700 rounded-lg shadow-xl w-[480px] max-h-[80vh] overflow-y-auto">
+    <div class="sticky top-0 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-700 px-6 py-4 flex justify-between items-center">
+      <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Cloud Storage</h2>
+      <button id="cloudModalClose" class="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 text-lg leading-none cursor-pointer">&times;</button>
+    </div>
+    <div id="cloudModalContent" class="p-6 flex flex-col gap-3"></div>
   </div>
 </div>
 
