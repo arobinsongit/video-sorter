@@ -1,6 +1,6 @@
 import { state } from './state.js';
 
-export async function fetchVideos(dir) {
+export async function fetchFiles(dir) {
   const resp = await fetch('/api/list?dir=' + encodeURIComponent(dir));
   return resp.json();
 }
@@ -33,7 +33,7 @@ export async function saveConfig() {
   }).catch(() => {});
 }
 
-export async function renameVideo(oldName, newName) {
+export async function renameFile(oldName, newName) {
   const resp = await fetch('/api/rename', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -50,7 +50,7 @@ export async function renameVideo(oldName, newName) {
 
 export async function saveSession() {
   if (!state.currentDir) return;
-  const file = state.currentIndex >= 0 ? state.videos[state.currentIndex] : '';
+  const file = state.currentIndex >= 0 ? state.files[state.currentIndex] : '';
   await fetch('/api/session/save', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

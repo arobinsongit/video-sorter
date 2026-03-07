@@ -1,7 +1,7 @@
 export const state = {
   currentDir: '',
-  videos: [],
-  videoMeta: {},
+  files: [],
+  fileMeta: {},
   currentIndex: -1,
   projectConfig: null,
   groupSelections: {},   // key -> Set (multi-select) or string|null (single-select)

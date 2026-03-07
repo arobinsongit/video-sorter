@@ -28,7 +28,7 @@ type GroupDef struct {
 	Prefix      string   `json:"prefix"`
 }
 
-// ProjectConfig is the JSON config stored per video folder
+// ProjectConfig is the JSON config stored per media folder
 type ProjectConfig struct {
 	Version      int               `json:"version"`
 	OutputFormat string            `json:"outputFormat"`
@@ -80,10 +80,11 @@ func defaultConfig() ProjectConfig {
 }
 
 func migrateOrLoadConfig(dir string) (ProjectConfig, error) {
-	jsonPath := filepath.Join(dir, "video-sorter-config.json")
+	jsonPath := filepath.Join(dir, "media-sorter-config.json")
+	legacyJsonPath := filepath.Join(dir, "video-sorter-config.json")
 	txtPath := filepath.Join(dir, "video-sorter-config.txt")
 
-	// 1. Try JSON config first
+	// 1. Try new JSON config name first
 	if data, err := os.ReadFile(jsonPath); err == nil {
 		var cfg ProjectConfig
 		if err := json.Unmarshal(data, &cfg); err == nil {
@@ -91,7 +92,17 @@ func migrateOrLoadConfig(dir string) (ProjectConfig, error) {
 		}
 	}
 
-	// 2. Try migrating from .txt
+	// 2. Try legacy JSON config name (video-sorter-config.json)
+	if data, err := os.ReadFile(legacyJsonPath); err == nil {
+		var cfg ProjectConfig
+		if err := json.Unmarshal(data, &cfg); err == nil {
+			// Migrate to new name
+			writeProjectConfig(jsonPath, cfg)
+			return cfg, nil
+		}
+	}
+
+	// 3. Try migrating from .txt
 	if data, err := os.ReadFile(txtPath); err == nil {
 		subjects, tags := parseConfigText(string(data))
 		cfg := defaultConfig()
@@ -106,7 +117,7 @@ func migrateOrLoadConfig(dir string) (ProjectConfig, error) {
 		return cfg, nil
 	}
 
-	// 3. No config exists — return defaults
+	// 4. No config exists — return defaults
 	cfg := defaultConfig()
 	writeProjectConfig(jsonPath, cfg)
 	return cfg, nil
@@ -147,7 +158,7 @@ func main() {
 	staticContent, _ := fs.Sub(staticFS, "static")
 	mux.Handle("/", http.FileServer(http.FS(staticContent)))
 
-	// List video files in a directory
+	// List media files in a directory
 	mux.HandleFunc("/api/list", func(w http.ResponseWriter, r *http.Request) {
 		dir := r.URL.Query().Get("dir")
 		if dir == "" {
@@ -161,40 +172,46 @@ func main() {
 			return
 		}
 
-		type VideoInfo struct {
+		type FileInfo struct {
 			Name     string `json:"name"`
 			Size     int64  `json:"size"`
 			Modified string `json:"modified"`
 		}
 
-		videoExts := map[string]bool{".mp4": true, ".mov": true, ".avi": true, ".mkv": true, ".webm": true}
-		var videos []VideoInfo
+		mediaExts := map[string]bool{
+			// Video
+			".mp4": true, ".mov": true, ".avi": true, ".mkv": true, ".webm": true,
+			// Photo
+			".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true,
+			".bmp": true, ".tiff": true, ".tif": true, ".heic": true, ".heif": true,
+		}
+		var files []FileInfo
 		for _, e := range entries {
 			if e.IsDir() {
 				continue
 			}
 			ext := strings.ToLower(filepath.Ext(e.Name()))
-			if videoExts[ext] {
+			if mediaExts[ext] {
 				info, err := e.Info()
 				if err != nil {
 					continue
 				}
-				videos = append(videos, VideoInfo{
+				files = append(files, FileInfo{
 					Name:     e.Name(),
 					Size:     info.Size(),
 					Modified: info.ModTime().Format("2006-01-02 15:04"),
 				})
 			}
 		}
-		sort.Slice(videos, func(i, j int) bool {
-			return strings.ToLower(videos[i].Name) < strings.ToLower(videos[j].Name)
+		sort.Slice(files, func(i, j int) bool {
+			return strings.ToLower(files[i].Name) < strings.ToLower(files[j].Name)
 		})
 
-		jsonOK(w, videos)
+		jsonOK(w, files)
 	})
 
-	// Serve video files
-	mux.HandleFunc("/api/video", func(w http.ResponseWriter, r *http.Request) {
+	// Serve media files
+	mux.HandleFunc("/api/media", func(w http.ResponseWriter, r *http.Request) {
 		dir := r.URL.Query().Get("dir")
 		file := r.URL.Query().Get("file")
 		if dir == "" || file == "" {
@@ -245,7 +262,7 @@ func main() {
 			return
 		}
 
-		configPath := filepath.Join(req.Dir, "video-sorter-config.json")
+		configPath := filepath.Join(req.Dir, "media-sorter-config.json")
 		if err := writeProjectConfig(configPath, req.Config); err != nil {
 			jsonError(w, err.Error(), 500)
 			return
@@ -253,7 +270,7 @@ func main() {
 		jsonOK(w, "ok")
 	})
 
-	// Rename/move/copy video
+	// Rename/move/copy file
 	mux.HandleFunc("/api/rename", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			jsonError(w, "POST required", 405)
@@ -374,13 +391,26 @@ func main() {
 		jsonOK(w, "ok")
 	})
 
-	// Session file: ~/.video-sorter-session.json
-	// User settings file: ~/.video-sorter-settings.json
+	// Session file: ~/.media-sorter-session.json
+	// User settings file: ~/.media-sorter-settings.json
 	sessionPath := ""
 	userSettingsPath := ""
 	if home, err := os.UserHomeDir(); err == nil {
-		sessionPath = filepath.Join(home, ".video-sorter-session.json")
-		userSettingsPath = filepath.Join(home, ".video-sorter-settings.json")
+		sessionPath = filepath.Join(home, ".media-sorter-session.json")
+		userSettingsPath = filepath.Join(home, ".media-sorter-settings.json")
+		// Migrate legacy filenames
+		legacySession := filepath.Join(home, ".video-sorter-session.json")
+		legacySettings := filepath.Join(home, ".video-sorter-settings.json")
+		if _, err := os.Stat(sessionPath); os.IsNotExist(err) {
+			if _, err := os.Stat(legacySession); err == nil {
+				os.Rename(legacySession, sessionPath)
+			}
+		}
+		if _, err := os.Stat(userSettingsPath); os.IsNotExist(err) {
+			if _, err := os.Stat(legacySettings); err == nil {
+				os.Rename(legacySettings, userSettingsPath)
+			}
+		}
 	}
 
 	// Load session
@@ -465,7 +495,7 @@ func main() {
 	port := listener.Addr().(*net.TCPAddr).Port
 	url := fmt.Sprintf("http://127.0.0.1:%d", port)
 
-	fmt.Printf("Video Sorter running at %s\n", url)
+	fmt.Printf("Media Sorter running at %s\n", url)
 
 	// Open browser
 	go openBrowser(url)

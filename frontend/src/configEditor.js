@@ -67,7 +67,7 @@ function renderConfigEditor() {
   if (cfg.outputMode === 'move' || cfg.outputMode === 'copy') {
     content.appendChild(makeSection('Output Folder', () => {
       const input = makeInput(cfg.outputFolder || '', val => { cfg.outputFolder = val; });
-      input.placeholder = 'Path (relative to video folder or absolute)';
+      input.placeholder = 'Path (relative to media folder or absolute)';
       return input;
     }));
   }
