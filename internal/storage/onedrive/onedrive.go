@@ -1,4 +1,4 @@
-package main
+package onedrive
 
 import (
 	"bytes"
@@ -10,90 +10,97 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"video-sorter/internal/storage"
 )
 
-// OneDriveStorage implements StorageProvider for Microsoft OneDrive.
-type OneDriveStorage struct {
+// Storage implements storage.Provider for Microsoft OneDrive.
+type Storage struct {
 	accessToken string
 }
 
-// onedriveCredsPath returns the path to the stored OneDrive credentials.
-func onedriveCredsPath() string {
-	return filepath.Join(credentialsDir(), "onedrive-credentials.json")
-}
-
-// onedriveTokenPath returns the path to the stored OneDrive token.
-func onedriveTokenPath() string {
-	return filepath.Join(credentialsDir(), "onedrive-token.json")
-}
-
-// OneDriveCredentials holds OAuth client ID/secret for OneDrive.
-type OneDriveCredentials struct {
+// Credentials holds OAuth client ID/secret for OneDrive.
+type Credentials struct {
 	ClientID     string `json:"clientId"`
 	ClientSecret string `json:"clientSecret"`
 }
 
-// OneDriveToken holds the OneDrive access/refresh tokens.
-type OneDriveToken struct {
+// Token holds the OneDrive access/refresh tokens.
+type Token struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresAt    int64  `json:"expires_at"`
 }
 
-// loadOneDriveCreds reads saved OneDrive OAuth credentials from disk.
-func loadOneDriveCreds() (*OneDriveCredentials, error) {
-	data, err := os.ReadFile(onedriveCredsPath())
+// CredsPath returns the path to the stored OneDrive credentials.
+func CredsPath() string {
+	return filepath.Join(storage.CredentialsDir(), "onedrive-credentials.json")
+}
+
+// TokenPath returns the path to the stored OneDrive token.
+func TokenPath() string {
+	return filepath.Join(storage.CredentialsDir(), "onedrive-token.json")
+}
+
+// LoadCreds reads saved OneDrive OAuth credentials from disk.
+func LoadCreds() (*Credentials, error) {
+	data, err := os.ReadFile(CredsPath())
 	if err != nil {
 		return nil, err
 	}
-	var creds OneDriveCredentials
+	var creds Credentials
 	if err := json.Unmarshal(data, &creds); err != nil {
 		return nil, err
 	}
 	return &creds, nil
 }
 
-// loadOneDriveToken reads a saved OneDrive token from disk.
-func loadOneDriveToken() (*OneDriveToken, error) {
-	data, err := os.ReadFile(onedriveTokenPath())
+// LoadToken reads a saved OneDrive token from disk.
+func LoadToken() (*Token, error) {
+	data, err := os.ReadFile(TokenPath())
 	if err != nil {
 		return nil, err
 	}
-	var token OneDriveToken
+	var token Token
 	if err := json.Unmarshal(data, &token); err != nil {
 		return nil, err
 	}
 	return &token, nil
 }
 
-// saveOneDriveToken saves a OneDrive token to disk.
-func saveOneDriveToken(token *OneDriveToken) error {
+// SaveToken saves a OneDrive token to disk.
+func SaveToken(token *Token) error {
 	data, err := json.MarshalIndent(token, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(onedriveTokenPath(), data, 0600)
+	return os.WriteFile(TokenPath(), data, 0600)
 }
 
-// newOneDriveStorage creates a OneDrive storage provider from a saved token.
-func newOneDriveStorage() (*OneDriveStorage, error) {
-	token, err := loadOneDriveToken()
+// New creates a OneDrive storage provider from a saved token.
+func New() (*Storage, error) {
+	token, err := LoadToken()
 	if err != nil {
 		return nil, fmt.Errorf("no saved OneDrive token: %w", err)
 	}
-	return &OneDriveStorage{accessToken: token.AccessToken}, nil
+	return &Storage{accessToken: token.AccessToken}, nil
 }
 
-// onedriveAuthURL returns the OAuth2 authorization URL.
-func onedriveAuthURL(clientID, redirectURL, state string) string {
+// NewFromToken creates a OneDrive storage provider from a token directly.
+func NewFromToken(accessToken string) *Storage {
+	return &Storage{accessToken: accessToken}
+}
+
+// AuthURL returns the OAuth2 authorization URL.
+func AuthURL(clientID, redirectURL, state string) string {
 	return fmt.Sprintf(
 		"https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize?client_id=%s&redirect_uri=%s&response_type=code&scope=Files.ReadWrite.All+offline_access&state=%s",
 		clientID, redirectURL, state,
 	)
 }
 
-// exchangeOneDriveCode exchanges an OAuth code for tokens.
-func exchangeOneDriveCode(clientID, clientSecret, code, redirectURL string) (*OneDriveToken, error) {
+// ExchangeCode exchanges an OAuth code for tokens.
+func ExchangeCode(clientID, clientSecret, code, redirectURL string) (*Token, error) {
 	body := fmt.Sprintf("client_id=%s&client_secret=%s&code=%s&redirect_uri=%s&grant_type=authorization_code&scope=Files.ReadWrite.All+offline_access",
 		clientID, clientSecret, code, redirectURL)
 
@@ -117,15 +124,14 @@ func exchangeOneDriveCode(clientID, clientSecret, code, redirectURL string) (*On
 		return nil, fmt.Errorf("onedrive oauth error: %s", result.Error)
 	}
 
-	return &OneDriveToken{
+	return &Token{
 		AccessToken:  result.AccessToken,
 		RefreshToken: result.RefreshToken,
 		ExpiresAt:    time.Now().Add(time.Duration(result.ExpiresIn) * time.Second).Unix(),
 	}, nil
 }
 
-// graphAPI makes an authenticated Microsoft Graph API call.
-func (o *OneDriveStorage) graphAPI(method, url string, body io.Reader) (*http.Response, error) {
+func (o *Storage) graphAPI(method, url string, body io.Reader) (*http.Response, error) {
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {
 		return nil, err
@@ -137,7 +143,6 @@ func (o *OneDriveStorage) graphAPI(method, url string, body io.Reader) (*http.Re
 	return http.DefaultClient.Do(req)
 }
 
-// parseOneDrivePath converts "onedrive:///path/to/folder" to "/path/to/folder".
 func parseOneDrivePath(fullPath string) string {
 	p := strings.TrimPrefix(fullPath, "onedrive://")
 	if p == "" || p == "/" {
@@ -149,7 +154,6 @@ func parseOneDrivePath(fullPath string) string {
 	return p
 }
 
-// graphDriveItemURL builds the Graph API URL for a path.
 func graphDriveItemURL(path string) string {
 	if path == "" || path == "/" {
 		return "https://graph.microsoft.com/v1.0/me/drive/root"
@@ -157,7 +161,7 @@ func graphDriveItemURL(path string) string {
 	return fmt.Sprintf("https://graph.microsoft.com/v1.0/me/drive/root:%s:", path)
 }
 
-func (o *OneDriveStorage) ListFiles(path string) ([]FileInfo, error) {
+func (o *Storage) ListFiles(path string) ([]storage.FileInfo, error) {
 	odPath := parseOneDrivePath(path)
 
 	var url string
@@ -167,7 +171,7 @@ func (o *OneDriveStorage) ListFiles(path string) ([]FileInfo, error) {
 		url = fmt.Sprintf("https://graph.microsoft.com/v1.0/me/drive/root:%s:/children", odPath)
 	}
 
-	var files []FileInfo
+	var files []storage.FileInfo
 	for url != "" {
 		resp, err := o.graphAPI("GET", url, nil)
 		if err != nil {
@@ -177,9 +181,9 @@ func (o *OneDriveStorage) ListFiles(path string) ([]FileInfo, error) {
 
 		var result struct {
 			Value []struct {
-				Name             string `json:"name"`
-				Size             int64  `json:"size"`
-				LastModified     struct {
+				Name         string `json:"name"`
+				Size         int64  `json:"size"`
+				LastModified struct {
 					DateTime string `json:"dateTime"`
 				} `json:"lastModifiedDateTime"`
 				Folder *struct{} `json:"folder"`
@@ -187,7 +191,6 @@ func (o *OneDriveStorage) ListFiles(path string) ([]FileInfo, error) {
 			NextLink string `json:"@odata.nextLink"`
 		}
 
-		// Re-read response for pagination
 		respBody, _ := io.ReadAll(resp.Body)
 		if err := json.Unmarshal(respBody, &result); err != nil {
 			return nil, err
@@ -198,7 +201,7 @@ func (o *OneDriveStorage) ListFiles(path string) ([]FileInfo, error) {
 				continue
 			}
 			ext := strings.ToLower(filepath.Ext(item.Name))
-			if !mediaExts[ext] {
+			if !storage.MediaExts[ext] {
 				continue
 			}
 			modified := ""
@@ -207,7 +210,7 @@ func (o *OneDriveStorage) ListFiles(path string) ([]FileInfo, error) {
 					modified = t.Format("2006-01-02 15:04")
 				}
 			}
-			files = append(files, FileInfo{
+			files = append(files, storage.FileInfo{
 				Name:     item.Name,
 				Size:     item.Size,
 				Modified: modified,
@@ -219,7 +222,7 @@ func (o *OneDriveStorage) ListFiles(path string) ([]FileInfo, error) {
 	return files, nil
 }
 
-func (o *OneDriveStorage) ServeFile(w http.ResponseWriter, r *http.Request, dir, file string) {
+func (o *Storage) ServeFile(w http.ResponseWriter, r *http.Request, dir, file string) {
 	odPath := parseOneDrivePath(dir)
 	fullPath := odPath + "/" + file
 
@@ -237,7 +240,7 @@ func (o *OneDriveStorage) ServeFile(w http.ResponseWriter, r *http.Request, dir,
 	io.Copy(w, resp.Body)
 }
 
-func (o *OneDriveStorage) ReadFile(path string) ([]byte, error) {
+func (o *Storage) ReadFile(path string) ([]byte, error) {
 	odPath := parseOneDrivePath(path)
 	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/me/drive/root:%s:/content", odPath)
 
@@ -252,7 +255,7 @@ func (o *OneDriveStorage) ReadFile(path string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-func (o *OneDriveStorage) WriteFile(path string, data []byte) error {
+func (o *Storage) WriteFile(path string, data []byte) error {
 	odPath := parseOneDrivePath(path)
 	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/me/drive/root:%s:/content", odPath)
 
@@ -275,7 +278,7 @@ func (o *OneDriveStorage) WriteFile(path string, data []byte) error {
 	return nil
 }
 
-func (o *OneDriveStorage) Rename(dir, oldName, newName string) error {
+func (o *Storage) Rename(dir, oldName, newName string) error {
 	odPath := parseOneDrivePath(dir)
 	itemPath := odPath + "/" + oldName
 
@@ -301,12 +304,11 @@ func (o *OneDriveStorage) Rename(dir, oldName, newName string) error {
 	return nil
 }
 
-func (o *OneDriveStorage) MoveFile(oldPath, newPath string) error {
+func (o *Storage) MoveFile(oldPath, newPath string) error {
 	odOld := parseOneDrivePath(oldPath)
-	newName := cloudBase(newPath)
-	newDir := cloudDir(parseOneDrivePath(newPath))
+	newName := storage.CloudBase(newPath)
+	newDir := storage.CloudDir(parseOneDrivePath(newPath))
 
-	// Get the destination folder's drive item ID
 	dirURL := graphDriveItemURL(newDir)
 	resp, err := o.graphAPI("GET", dirURL, nil)
 	if err != nil {
@@ -346,12 +348,11 @@ func (o *OneDriveStorage) MoveFile(oldPath, newPath string) error {
 	return nil
 }
 
-func (o *OneDriveStorage) CopyFile(oldPath, newPath string) error {
+func (o *Storage) CopyFile(oldPath, newPath string) error {
 	odOld := parseOneDrivePath(oldPath)
-	newName := cloudBase(newPath)
-	newDir := cloudDir(parseOneDrivePath(newPath))
+	newName := storage.CloudBase(newPath)
+	newDir := storage.CloudDir(parseOneDrivePath(newPath))
 
-	// Get the destination folder's drive item ID
 	dirURL := graphDriveItemURL(newDir)
 	resp, err := o.graphAPI("GET", dirURL, nil)
 	if err != nil {
@@ -389,7 +390,6 @@ func (o *OneDriveStorage) CopyFile(oldPath, newPath string) error {
 		return err
 	}
 	defer resp2.Body.Close()
-	// Copy returns 202 Accepted (async)
 	if resp2.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp2.Body)
 		return fmt.Errorf("onedrive copy failed: %d - %s", resp2.StatusCode, string(body))
@@ -397,7 +397,7 @@ func (o *OneDriveStorage) CopyFile(oldPath, newPath string) error {
 	return nil
 }
 
-func (o *OneDriveStorage) FileExists(path string) bool {
+func (o *Storage) FileExists(path string) bool {
 	odPath := parseOneDrivePath(path)
 	url := graphDriveItemURL(odPath)
 	resp, err := o.graphAPI("GET", url, nil)
@@ -408,7 +408,7 @@ func (o *OneDriveStorage) FileExists(path string) bool {
 	return resp.StatusCode == 200
 }
 
-func (o *OneDriveStorage) MkdirAll(path string) error {
+func (o *Storage) MkdirAll(path string) error {
 	odPath := parseOneDrivePath(path)
 	if odPath == "" {
 		return nil
@@ -439,15 +439,18 @@ func (o *OneDriveStorage) MkdirAll(path string) error {
 	return nil
 }
 
-func (o *OneDriveStorage) IsLocal() bool {
+func (o *Storage) IsLocal() bool {
 	return false
 }
 
-// listOneDriveFolders lists folders at a given path for the browse UI.
-func (o *OneDriveStorage) listFolders(path string) ([]struct {
+// FolderEntry represents a folder in the browse UI.
+type FolderEntry struct {
 	Name string
 	Path string
-}, error) {
+}
+
+// ListFolders lists folders at a given path for the browse UI.
+func (o *Storage) ListFolders(path string) ([]FolderEntry, error) {
 	var url string
 	if path == "" || path == "/" {
 		url = "https://graph.microsoft.com/v1.0/me/drive/root/children?$filter=folder ne null"
@@ -471,10 +474,7 @@ func (o *OneDriveStorage) listFolders(path string) ([]struct {
 		return nil, err
 	}
 
-	var folders []struct {
-		Name string
-		Path string
-	}
+	var folders []FolderEntry
 	for _, item := range result.Value {
 		if item.Folder == nil {
 			continue
@@ -483,10 +483,7 @@ func (o *OneDriveStorage) listFolders(path string) ([]struct {
 		if path != "" && path != "/" {
 			itemPath = strings.TrimRight(path, "/") + "/" + item.Name
 		}
-		folders = append(folders, struct {
-			Name string
-			Path string
-		}{Name: item.Name, Path: itemPath})
+		folders = append(folders, FolderEntry{Name: item.Name, Path: itemPath})
 	}
 	return folders, nil
 }
