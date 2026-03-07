@@ -6,9 +6,16 @@ call npm run build
 
 if not exist dist mkdir dist
 
+if exist .env.local (
+  for /f "usebackq tokens=1,* delims==" %%a in (".env.local") do (
+    if not "%%a"=="" set "%%a=%%b"
+  )
+)
+
 for /f "tokens=*" %%i in ('git describe --tags --always --dirty 2^>nul') do set VERSION=%%i
 if "%VERSION%"=="" set VERSION=dev
 set LDFLAGS=-s -w -X main.version=%VERSION%
+if not "%GDRIVE_CLIENT_ID%"=="" set LDFLAGS=%LDFLAGS% -X media-sorter/internal/storage/gdrive.embeddedClientID=%GDRIVE_CLIENT_ID% -X media-sorter/internal/storage/gdrive.embeddedClientSecret=%GDRIVE_CLIENT_SECRET%
 
 echo [1/4] Windows (amd64)...
 set GOOS=windows

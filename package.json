@@ -1,4 +1,5 @@
 {
+  "name": "media-sorter",
   "private": true,
   "scripts": {
     "build": "node build.mjs"

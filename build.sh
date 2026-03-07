@@ -6,8 +6,15 @@ npm run build
 
 mkdir -p dist
 
+if [ -f .env.local ]; then
+  source .env.local
+fi
+
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS="-s -w -X main.version=${VERSION}"
+if [ -n "$GDRIVE_CLIENT_ID" ]; then
+  LDFLAGS="${LDFLAGS} -X media-sorter/internal/storage/gdrive.embeddedClientID=${GDRIVE_CLIENT_ID} -X media-sorter/internal/storage/gdrive.embeddedClientSecret=${GDRIVE_CLIENT_SECRET}"
+fi
 
 echo "[1/4] Windows (amd64)..."
 GOOS=windows GOARCH=amd64 go build -ldflags="${LDFLAGS}" -o dist/media-sorter-windows.exe ./cmd/media-sorter
