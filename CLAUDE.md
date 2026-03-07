@@ -27,6 +27,11 @@ A portable media sorting tool. Users browse videos and photos, annotate them wit
   - `theme.js` — Dark/light theme toggle + button class helpers
   - `modal.js` — Reusable modal dialog
   - `utils.js` — MRU helpers, formatSize, clearChildren
+  - `cloud.js` — Cloud storage connection UI (Google Drive, S3, Dropbox, OneDrive)
+
+### Backend files
+- `storage.go` — StorageProvider interface and LocalStorage implementation
+- `storage_gdrive.go` — Google Drive implementation (OAuth2, Drive API v3)
 
 ### Build output
 - `static/` — Built frontend files (index.html, app.min.js, favicon.svg) — committed to git so `go build` works without npm
@@ -40,6 +45,8 @@ A portable media sorting tool. Users browse videos and photos, annotate them wit
 - MRU (Most Recently Used) sorting for all group options
 - Dynamic group rendering from config — no hardcoded metadata types
 - Template-based output format with `{token}` placeholders
+- Cloud storage via StorageProvider interface — `gdrive://path` routes to Google Drive
+- Cloud credentials stored in `~/.media-sorter/` (OAuth tokens, client credentials)
 
 ## Config Format
 
@@ -88,6 +95,11 @@ Output modes: `rename` (in place), `move` (to outputFolder), `copy` (to outputFo
 | `/api/session/save` | POST | Save session state |
 | `/api/user-settings` | GET/POST | Read/write user settings |
 | `/api/open-folder?dir=` | GET | Open directory in OS file explorer |
+| `/api/cloud/providers` | GET | List cloud providers and connection status |
+| `/api/cloud/connect` | POST | Initiate OAuth flow `{provider}` |
+| `/api/cloud/disconnect` | POST | Remove stored credentials `{provider}` |
+| `/api/cloud/browse?provider=&path=` | GET | Browse cloud folder structure |
+| `/api/cloud/callback` | GET | OAuth callback handler |
 
 ## Build
 

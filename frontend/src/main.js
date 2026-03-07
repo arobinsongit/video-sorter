@@ -6,6 +6,7 @@ import { renderAllGroups } from './groups.js';
 import { updatePreview, parseAnnotations } from './preview.js';
 import { setupFileList, renderFileList } from './fileList.js';
 import { setupConfigEditor } from './configEditor.js';
+import { setupCloud, closeCloudModal } from './cloud.js';
 
 function parseFileList(data) {
   state.fileMeta = {};
@@ -181,7 +182,10 @@ function init() {
   setupModal();
   setupFileList(selectFile);
   setupConfigEditor();
+  setupCloud();
   setupSplitter();
+
+  document.getElementById('cloudModalClose').addEventListener('click', closeCloudModal);
 
   document.getElementById('btnLoad').addEventListener('click', loadFolder);
   dirInput.addEventListener('keydown', e => { if (e.key === 'Enter') loadFolder(); });

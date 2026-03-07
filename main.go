@@ -1,10 +1,10 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -12,8 +12,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
+	"time"
+
+	"golang.org/x/oauth2"
+	"google.golang.org/api/drive/v3"
+	"google.golang.org/api/option"
 )
 
 // GroupDef defines a metadata group (e.g. Subject, Tags, Quality)
@@ -79,73 +83,57 @@ func defaultConfig() ProjectConfig {
 	}
 }
 
-func migrateOrLoadConfig(dir string) (ProjectConfig, error) {
-	jsonPath := filepath.Join(dir, "media-sorter-config.json")
-	legacyJsonPath := filepath.Join(dir, "video-sorter-config.json")
-	txtPath := filepath.Join(dir, "video-sorter-config.txt")
+const configFileName = "media-sorter-config.json"
 
-	// 1. Try new JSON config name first
-	if data, err := os.ReadFile(jsonPath); err == nil {
+func loadConfig(store StorageProvider, dir string) (ProjectConfig, error) {
+	configPath := filepath.Join(dir, configFileName)
+
+	// 1. Try current config name
+	if data, err := store.ReadFile(configPath); err == nil {
 		var cfg ProjectConfig
 		if err := json.Unmarshal(data, &cfg); err == nil {
 			return cfg, nil
 		}
 	}
 
-	// 2. Try legacy JSON config name (video-sorter-config.json)
-	if data, err := os.ReadFile(legacyJsonPath); err == nil {
-		var cfg ProjectConfig
-		if err := json.Unmarshal(data, &cfg); err == nil {
-			// Migrate to new name
-			writeProjectConfig(jsonPath, cfg)
+	// 2. Try legacy config names (local only)
+	if store.IsLocal() {
+		legacyJsonPath := filepath.Join(dir, "video-sorter-config.json")
+		if data, err := store.ReadFile(legacyJsonPath); err == nil {
+			var cfg ProjectConfig
+			if err := json.Unmarshal(data, &cfg); err == nil {
+				saveConfig(store, dir, cfg)
+				return cfg, nil
+			}
+		}
+
+		txtPath := filepath.Join(dir, "video-sorter-config.txt")
+		if data, err := store.ReadFile(txtPath); err == nil {
+			subjects, tags := parseConfigText(string(data))
+			cfg := defaultConfig()
+			if len(subjects) > 0 {
+				cfg.Groups[0].Options = subjects
+			}
+			if len(tags) > 0 {
+				cfg.Groups[1].Options = tags
+			}
+			saveConfig(store, dir, cfg)
 			return cfg, nil
 		}
 	}
 
-	// 3. Try migrating from .txt
-	if data, err := os.ReadFile(txtPath); err == nil {
-		subjects, tags := parseConfigText(string(data))
-		cfg := defaultConfig()
-		if len(subjects) > 0 {
-			cfg.Groups[0].Options = subjects
-		}
-		if len(tags) > 0 {
-			cfg.Groups[1].Options = tags
-		}
-		// Write the new JSON config
-		writeProjectConfig(jsonPath, cfg)
-		return cfg, nil
-	}
-
-	// 4. No config exists — return defaults
+	// 3. No config — return defaults and save
 	cfg := defaultConfig()
-	writeProjectConfig(jsonPath, cfg)
+	saveConfig(store, dir, cfg)
 	return cfg, nil
 }
 
-func writeProjectConfig(path string, cfg ProjectConfig) error {
+func saveConfig(store StorageProvider, dir string, cfg ProjectConfig) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Close()
+	return store.WriteFile(filepath.Join(dir, configFileName), data)
 }
 
 //go:embed all:static
@@ -154,59 +142,28 @@ var staticFS embed.FS
 func main() {
 	mux := http.NewServeMux()
 
-	// Serve embedded frontend (static/index.html, static/app.min.js, static/favicon.svg)
+	// Try to restore Google Drive connection
+	if gd, err := newGoogleDriveStorage(); err == nil {
+		gdrive = gd
+	}
+
+	// Serve embedded frontend
 	staticContent, _ := fs.Sub(staticFS, "static")
 	mux.Handle("/", http.FileServer(http.FS(staticContent)))
 
-	// List media files in a directory
+	// List media files
 	mux.HandleFunc("/api/list", func(w http.ResponseWriter, r *http.Request) {
 		dir := r.URL.Query().Get("dir")
 		if dir == "" {
 			jsonError(w, "dir parameter required", 400)
 			return
 		}
-
-		entries, err := os.ReadDir(dir)
+		store := getStorageProvider(dir)
+		files, err := store.ListFiles(dir)
 		if err != nil {
 			jsonError(w, err.Error(), 500)
 			return
 		}
-
-		type FileInfo struct {
-			Name     string `json:"name"`
-			Size     int64  `json:"size"`
-			Modified string `json:"modified"`
-		}
-
-		mediaExts := map[string]bool{
-			// Video
-			".mp4": true, ".mov": true, ".avi": true, ".mkv": true, ".webm": true,
-			// Photo
-			".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true,
-			".bmp": true, ".tiff": true, ".tif": true, ".heic": true, ".heif": true,
-		}
-		var files []FileInfo
-		for _, e := range entries {
-			if e.IsDir() {
-				continue
-			}
-			ext := strings.ToLower(filepath.Ext(e.Name()))
-			if mediaExts[ext] {
-				info, err := e.Info()
-				if err != nil {
-					continue
-				}
-				files = append(files, FileInfo{
-					Name:     e.Name(),
-					Size:     info.Size(),
-					Modified: info.ModTime().Format("2006-01-02 15:04"),
-				})
-			}
-		}
-		sort.Slice(files, func(i, j int) bool {
-			return strings.ToLower(files[i].Name) < strings.ToLower(files[j].Name)
-		})
-
 		jsonOK(w, files)
 	})
 
@@ -218,27 +175,19 @@ func main() {
 			jsonError(w, "dir and file parameters required", 400)
 			return
 		}
-
-		// Prevent path traversal
-		clean := filepath.Clean(file)
-		if strings.Contains(clean, string(filepath.Separator)) || strings.Contains(clean, "..") {
-			jsonError(w, "invalid filename", 400)
-			return
-		}
-
-		fullPath := filepath.Join(dir, clean)
-		http.ServeFile(w, r, fullPath)
+		store := getStorageProvider(dir)
+		store.ServeFile(w, r, dir, file)
 	})
 
-	// Read config (JSON config with migration from .txt)
+	// Read config
 	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
 		dir := r.URL.Query().Get("dir")
 		if dir == "" {
 			jsonError(w, "dir parameter required", 400)
 			return
 		}
-
-		cfg, err := migrateOrLoadConfig(dir)
+		store := getStorageProvider(dir)
+		cfg, err := loadConfig(store, dir)
 		if err != nil {
 			jsonError(w, err.Error(), 500)
 			return
@@ -246,13 +195,12 @@ func main() {
 		jsonOK(w, cfg)
 	})
 
-	// Save config (receives full ProjectConfig JSON)
+	// Save config
 	mux.HandleFunc("/api/config/save", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			jsonError(w, "POST required", 405)
 			return
 		}
-
 		var req struct {
 			Dir    string        `json:"dir"`
 			Config ProjectConfig `json:"config"`
@@ -261,9 +209,8 @@ func main() {
 			jsonError(w, err.Error(), 400)
 			return
 		}
-
-		configPath := filepath.Join(req.Dir, "media-sorter-config.json")
-		if err := writeProjectConfig(configPath, req.Config); err != nil {
+		store := getStorageProvider(req.Dir)
+		if err := saveConfig(store, req.Dir, req.Config); err != nil {
 			jsonError(w, err.Error(), 500)
 			return
 		}
@@ -289,26 +236,28 @@ func main() {
 			return
 		}
 
-		// Prevent path traversal on filenames
-		for _, name := range []string{req.OldName, req.NewName} {
-			clean := filepath.Clean(name)
-			if strings.Contains(clean, string(filepath.Separator)) || strings.Contains(clean, "..") {
-				jsonError(w, "invalid filename", 400)
-				return
-			}
-		}
+		store := getStorageProvider(req.Dir)
 
-		// Validate outputFolder if provided
-		if req.OutputFolder != "" {
-			clean := filepath.Clean(req.OutputFolder)
-			if strings.Contains(clean, "..") {
-				jsonError(w, "invalid output folder", 400)
-				return
+		// Validate filenames (local only — cloud providers handle their own paths)
+		if store.IsLocal() {
+			for _, name := range []string{req.OldName, req.NewName} {
+				clean := filepath.Clean(name)
+				if strings.Contains(clean, string(filepath.Separator)) || strings.Contains(clean, "..") {
+					jsonError(w, "invalid filename", 400)
+					return
+				}
+			}
+			if req.OutputFolder != "" {
+				clean := filepath.Clean(req.OutputFolder)
+				if strings.Contains(clean, "..") {
+					jsonError(w, "invalid output folder", 400)
+					return
+				}
 			}
 		}
 
 		oldPath := filepath.Join(req.Dir, req.OldName)
-		if _, err := os.Stat(oldPath); os.IsNotExist(err) {
+		if !store.FileExists(oldPath) {
 			jsonError(w, "file not found: "+req.OldName, 404)
 			return
 		}
@@ -323,54 +272,50 @@ func main() {
 			newPath = filepath.Join(req.Dir, req.NewName)
 		} else {
 			destDir := req.OutputFolder
-			if !filepath.IsAbs(destDir) {
+			if store.IsLocal() && !filepath.IsAbs(destDir) {
 				destDir = filepath.Join(req.Dir, destDir)
 			}
-			if err := os.MkdirAll(destDir, 0755); err != nil {
+			if err := store.MkdirAll(destDir); err != nil {
 				jsonError(w, "failed to create output folder: "+err.Error(), 500)
 				return
 			}
 			newPath = filepath.Join(destDir, req.NewName)
 		}
 
-		if _, err := os.Stat(newPath); err == nil {
+		if store.FileExists(newPath) {
 			jsonError(w, "target already exists: "+req.NewName, 409)
 			return
 		}
 
+		var err error
 		switch mode {
-		case "rename", "move":
-			if err := os.Rename(oldPath, newPath); err != nil {
-				// Cross-filesystem move: fall back to copy+delete
-				if mode == "move" {
-					if err := copyFile(oldPath, newPath); err != nil {
-						jsonError(w, err.Error(), 500)
-						return
-					}
-					os.Remove(oldPath)
-				} else {
-					jsonError(w, err.Error(), 500)
-					return
-				}
-			}
+		case "rename":
+			err = store.Rename(req.Dir, req.OldName, req.NewName)
+		case "move":
+			err = store.MoveFile(oldPath, newPath)
 		case "copy":
-			if err := copyFile(oldPath, newPath); err != nil {
-				jsonError(w, err.Error(), 500)
-				return
-			}
+			err = store.CopyFile(oldPath, newPath)
 		default:
 			jsonError(w, "invalid outputMode: "+mode, 400)
 			return
 		}
-
+		if err != nil {
+			jsonError(w, err.Error(), 500)
+			return
+		}
 		jsonOK(w, "ok")
 	})
 
-	// Open folder in OS file explorer
+	// Open folder in OS file explorer (local only)
 	mux.HandleFunc("/api/open-folder", func(w http.ResponseWriter, r *http.Request) {
 		dir := r.URL.Query().Get("dir")
 		if dir == "" {
 			jsonError(w, "dir parameter required", 400)
+			return
+		}
+		store := getStorageProvider(dir)
+		if !store.IsLocal() {
+			jsonError(w, "cannot open cloud folders in file explorer", 400)
 			return
 		}
 		info, err := os.Stat(dir)
@@ -391,8 +336,194 @@ func main() {
 		jsonOK(w, "ok")
 	})
 
-	// Session file: ~/.media-sorter-session.json
-	// User settings file: ~/.media-sorter-settings.json
+	// --- Cloud provider endpoints ---
+
+	// List cloud providers and connection status
+	mux.HandleFunc("/api/cloud/providers", func(w http.ResponseWriter, r *http.Request) {
+		type ProviderStatus struct {
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			Connected bool   `json:"connected"`
+			HasCreds  bool   `json:"hasCreds"`
+		}
+
+		_, credsErr := os.Stat(gdriveClientCredsPath())
+		providers := []ProviderStatus{
+			{ID: "gdrive", Name: "Google Drive", Connected: gdrive != nil, HasCreds: credsErr == nil},
+			{ID: "s3", Name: "Amazon S3", Connected: false, HasCreds: false},
+			{ID: "dropbox", Name: "Dropbox", Connected: false, HasCreds: false},
+			{ID: "onedrive", Name: "OneDrive", Connected: false, HasCreds: false},
+		}
+		jsonOK(w, providers)
+	})
+
+	// Store for OAuth state parameter
+	var oauthState string
+
+	// Initiate OAuth flow or save credentials
+	mux.HandleFunc("/api/cloud/connect", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			jsonError(w, "POST required", 405)
+			return
+		}
+
+		var req struct {
+			Provider string `json:"provider"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonError(w, err.Error(), 400)
+			return
+		}
+
+		switch req.Provider {
+		case "gdrive":
+			config, err := gdriveOAuthConfig(gdriveClientCredsPath())
+			if err != nil {
+				jsonError(w, "Google Drive credentials not configured. Place your OAuth client credentials JSON file at: "+gdriveClientCredsPath(), 400)
+				return
+			}
+			// Find the server's port for the callback URL
+			oauthState = fmt.Sprintf("media-sorter-%d", time.Now().UnixNano())
+			config.RedirectURL = fmt.Sprintf("http://127.0.0.1:%d/api/cloud/callback", serverPort)
+			authURL := config.AuthCodeURL(oauthState, oauth2.AccessTypeOffline, oauth2.ApprovalForce)
+			jsonOK(w, map[string]string{"authURL": authURL})
+		default:
+			jsonError(w, "provider not yet supported: "+req.Provider, 400)
+		}
+	})
+
+	// OAuth callback handler
+	mux.HandleFunc("/api/cloud/callback", func(w http.ResponseWriter, r *http.Request) {
+		state := r.URL.Query().Get("state")
+		if state != oauthState {
+			http.Error(w, "Invalid state parameter", http.StatusBadRequest)
+			return
+		}
+		code := r.URL.Query().Get("code")
+		if code == "" {
+			http.Error(w, "No code provided", http.StatusBadRequest)
+			return
+		}
+
+		config, err := gdriveOAuthConfig(gdriveClientCredsPath())
+		if err != nil {
+			http.Error(w, "Failed to load credentials", http.StatusInternalServerError)
+			return
+		}
+		config.RedirectURL = fmt.Sprintf("http://127.0.0.1:%d/api/cloud/callback", serverPort)
+
+		token, err := config.Exchange(context.Background(), code)
+		if err != nil {
+			http.Error(w, "Failed to exchange token: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		if err := saveGdriveToken(token); err != nil {
+			http.Error(w, "Failed to save token: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Create the Drive service
+		client := config.Client(context.Background(), token)
+		srv, err := drive.NewService(context.Background(), option.WithHTTPClient(client))
+		if err != nil {
+			http.Error(w, "Failed to create Drive service: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		gdrive = &GoogleDriveStorage{service: srv, token: token}
+		oauthState = ""
+
+		// Show success page that closes itself
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<!DOCTYPE html><html><body>
+			<h2>Google Drive connected successfully!</h2>
+			<p>You can close this tab and return to Media Sorter.</p>
+			<script>setTimeout(function(){window.close()},2000)</script>
+		</body></html>`))
+	})
+
+	// Disconnect a cloud provider
+	mux.HandleFunc("/api/cloud/disconnect", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			jsonError(w, "POST required", 405)
+			return
+		}
+
+		var req struct {
+			Provider string `json:"provider"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonError(w, err.Error(), 400)
+			return
+		}
+
+		switch req.Provider {
+		case "gdrive":
+			gdrive = nil
+			os.Remove(gdriveTokenPath())
+			jsonOK(w, "ok")
+		default:
+			jsonError(w, "unknown provider: "+req.Provider, 400)
+		}
+	})
+
+	// Browse cloud folder structure
+	mux.HandleFunc("/api/cloud/browse", func(w http.ResponseWriter, r *http.Request) {
+		provider := r.URL.Query().Get("provider")
+		path := r.URL.Query().Get("path")
+
+		switch provider {
+		case "gdrive":
+			if gdrive == nil {
+				jsonError(w, "Google Drive not connected", 400)
+				return
+			}
+
+			folderID := "root"
+			if path != "" && path != "/" {
+				var err error
+				folderID, err = gdrive.resolveFolder(path)
+				if err != nil {
+					jsonError(w, err.Error(), 500)
+					return
+				}
+			}
+
+			type FolderEntry struct {
+				Name string `json:"name"`
+				ID   string `json:"id"`
+				Path string `json:"path"`
+			}
+
+			q := fmt.Sprintf("'%s' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false", folderID)
+			result, err := gdrive.service.Files.List().Q(q).
+				Fields("files(id, name)").OrderBy("name").Do()
+			if err != nil {
+				jsonError(w, err.Error(), 500)
+				return
+			}
+
+			var folders []FolderEntry
+			for _, f := range result.Files {
+				entryPath := f.Name
+				if path != "" && path != "/" {
+					entryPath = strings.TrimRight(path, "/") + "/" + f.Name
+				}
+				folders = append(folders, FolderEntry{
+					Name: f.Name,
+					ID:   f.Id,
+					Path: entryPath,
+				})
+			}
+			jsonOK(w, folders)
+
+		default:
+			jsonError(w, "provider not supported: "+provider, 400)
+		}
+	})
+
+	// Session and user settings (local only — unchanged)
 	sessionPath := ""
 	userSettingsPath := ""
 	if home, err := os.UserHomeDir(); err == nil {
@@ -413,7 +544,6 @@ func main() {
 		}
 	}
 
-	// Load session
 	mux.HandleFunc("/api/session", func(w http.ResponseWriter, r *http.Request) {
 		if sessionPath == "" {
 			w.Header().Set("Content-Type", "application/json")
@@ -430,7 +560,6 @@ func main() {
 		w.Write(data)
 	})
 
-	// Save session
 	mux.HandleFunc("/api/session/save", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			jsonError(w, "POST required", 405)
@@ -452,7 +581,6 @@ func main() {
 		jsonOK(w, "ok")
 	})
 
-	// Load user settings
 	mux.HandleFunc("/api/user-settings", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" {
 			if userSettingsPath == "" {
@@ -492,17 +620,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to find free port: %v\n", err)
 		os.Exit(1)
 	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	url := fmt.Sprintf("http://127.0.0.1:%d", port)
+	serverPort = listener.Addr().(*net.TCPAddr).Port
+	url := fmt.Sprintf("http://127.0.0.1:%d", serverPort)
 
 	fmt.Printf("Media Sorter running at %s\n", url)
 
-	// Open browser
 	go openBrowser(url)
 
-	// Serve
 	http.Serve(listener, mux)
 }
+
+// serverPort is stored globally so OAuth callback URL can reference it.
+var serverPort int
 
 func jsonOK(w http.ResponseWriter, data any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -542,23 +671,6 @@ func parseConfigText(text string) (subjects []string, tags []string) {
 		}
 	}
 	return
-}
-
-func buildConfigText(subjects []string, tags []string) string {
-	var b strings.Builder
-	b.WriteString("# Subjects\n")
-	b.WriteString("# One per line\n")
-	for _, p := range subjects {
-		b.WriteString(p)
-		b.WriteString("\n")
-	}
-	b.WriteString("\n# Tags\n")
-	b.WriteString("# One per line (use dashes instead of spaces, e.g. home-run)\n")
-	for _, t := range tags {
-		b.WriteString(t)
-		b.WriteString("\n")
-	}
-	return b.String()
 }
 
 func openBrowser(url string) {
