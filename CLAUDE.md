@@ -174,7 +174,7 @@ if [[ "$RAW_USER" == ENV:* ]]; then RAW_USER="${!RAW_USER#ENV:}"; fi
 PREV_USER=$(gh auth status 2>&1 | grep "Active account: true" -B3 | head -1 | awk '{print $NF}')
 if [ "$PREV_USER" != "$RAW_USER" ]; then gh auth switch --user "$RAW_USER"; fi
 git push origin <branch>
-if [ "$PREV_USER" != "$RAW_USER" ] && [ -n "$PREV_USER" ]; then gh auth switch --user "$PREV_USER"; fi
+if [ "$PREV_USER" != "$RAW_USER" ] && [ -n "$PREV_USER" ]; then gh auth switch --user "$PREV_USER" 2>/dev/null; fi
 ```
 
 To use an env var instead, change the push user line to e.g. `ENV:GH_REPO_USER`.
