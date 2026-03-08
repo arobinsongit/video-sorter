@@ -570,6 +570,130 @@ This opens an interactive session where you can ask Claude to:
 - **Let it run tests.** Claude Code can run `go test ./...` and iterate on failures.
 - **Review before committing.** Claude will ask for confirmation before git operations. Read the diffs.
 
+### Smart Skills (Slash Commands)
+
+This project includes a set of "smart skills" — slash commands you can type inside Claude Code to automate common Git workflows. They handle branching, committing, merging, PRs, and more so you don't have to remember all the Git commands.
+
+**How to use:** Type the command inside your Claude Code session. You can add a description or options after it.
+
+#### `/smart-branch` — Start new work
+
+Creates a properly named feature branch from an up-to-date main.
+
+```
+> /smart-branch adding cloud storage support
+```
+
+Claude will detect the type (`feat`), suggest a branch name like `feat/add-cloud-storage`, confirm with you, create the branch, and optionally push it.
+
+#### `/smart-commit` — Organize and commit changes
+
+Analyzes all your changed files, groups them by concern (docs, tests, code, config), and creates separate conventional commits for each group.
+
+```
+> /smart-commit
+```
+
+Claude will:
+1. Check which branch you're on (creates one if you're on main)
+2. Group changed files by type (docs, tests, implementation, config)
+3. Stage each group and commit with a proper message like `feat(parser): add YAML support`
+4. Show a summary and offer to push
+
+You never need to manually `git add` or write commit messages.
+
+#### `/smart-merge` — Merge branches safely
+
+Merges your feature branch into main (or another target) with safety checks, conflict handling, and optional test runs.
+
+```
+> /smart-merge
+> /smart-merge strategy=squash
+> /smart-merge target=develop run_tests=true
+```
+
+Claude will:
+1. Detect source and target branches automatically
+2. Check for uncommitted changes and warn you
+3. Sync the target branch with remote
+4. Merge using your chosen strategy (merge, rebase, or squash)
+5. Help resolve conflicts if any arise
+6. Show a summary with next steps
+
+**Strategies:**
+- `merge` (default) — preserves full history with a merge commit
+- `rebase` — replays your commits for linear history
+- `squash` — combines all commits into one clean commit
+
+#### `/smart-save` — Quick WIP checkpoint
+
+Saves all current work as a WIP commit and pushes to remote. Great for end-of-day saves, switching context, or backing up before risky operations.
+
+```
+> /smart-save
+> /smart-save implementing YAML parser, 80% done
+```
+
+WIP commits can be cleaned up later with `/smart-commit` before creating a PR.
+
+#### `/smart-pull-request` — Create a PR with quality gates
+
+Runs quality checks (tests, linting), auto-fixes issues, then creates a GitHub pull request with an auto-generated description.
+
+```
+> /smart-pull-request
+```
+
+#### `/smart-pr-review` — Review a PR locally
+
+Checks out a PR locally, runs tests, and helps you leave feedback or approve/request changes.
+
+```
+> /smart-pr-review 42
+```
+
+#### `/smart-cleanup` — Remove old branches
+
+Finds and deletes merged, stale, and orphaned branches (local and remote) with safety checks.
+
+```
+> /smart-cleanup
+> /smart-cleanup --dry-run
+```
+
+#### `/smart-status` — Repository overview
+
+Shows a dashboard of your repo: current branch, open PRs, recent commits, and quick navigation actions.
+
+```
+> /smart-status
+```
+
+#### `/test` — Run tests
+
+Runs the Go test suite and fixes any failures.
+
+```
+> /test
+```
+
+#### Typical workflow
+
+Here's how these skills fit together for a typical feature:
+
+```
+> /smart-branch adding video thumbnails     # create branch
+  ... write code ...
+> /smart-save halfway done with thumbnails  # checkpoint
+  ... write more code ...
+> /smart-commit                              # organize commits
+> /test                                      # verify tests pass
+> /smart-pull-request                        # create PR
+  ... PR gets reviewed and approved ...
+> /smart-merge                               # merge to main
+> /smart-cleanup                             # delete old branch
+```
+
 ### RTK (Token Optimizer)
 
 [RTK](https://www.rtk-ai.app/) sits between Claude Code and your terminal, compressing command output before it reaches the AI context window. This reduces token usage by up to 89%, letting you do more in each session.
